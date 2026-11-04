@@ -1,0 +1,55 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C / C++ build artifacts
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.a
+*.lib
+build/
+dist/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Linters & Tooling
+.ruff_cache/
+.mypy_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Data & Results (prevent committing large raw outputs, keep directory structure)
+data/*
+!data/README.md
+!data/.gitkeep
+results/logs/*
+!results/logs/.gitkeep
+results/figures/*
+!results/figures/.gitkeep
+
+# Environment variables
+.env
+.env.*
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
