@@ -85,4 +85,3 @@ def args_to_config(args: argparse.Namespace) -> ExperimentConfig:
         delta=args.delta,
         seed=args.seed,
     )
-
