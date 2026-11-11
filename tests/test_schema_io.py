@@ -26,7 +26,7 @@ class TestSchemaIO(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_csv_header_and_columns_count(self) -> None:
-        """Verify new CSV file contains exactly 13 columns matching the exact header specification."""
+        """Verify new CSV file contains exactly 13 columns matching the exact header."""
         csv_path = self.test_dir / "test_header.csv"
         writer = CSVReportWriter(csv_path)
 
@@ -62,7 +62,7 @@ class TestSchemaIO(unittest.TestCase):
         self.assertEqual(tuple(cols), CSV_COLUMNS)
 
     def test_write_success_record(self) -> None:
-        """Verify successful record formatting: numeric precision, FALSE abort flag, and exact rel_error."""
+        """Verify successful record format: numeric precision, FALSE flag, and rel_error."""
         csv_path = self.test_dir / "test_success.csv"
         writer = CSVReportWriter(csv_path)
 
@@ -146,7 +146,7 @@ class TestSchemaIO(unittest.TestCase):
         self.assertEqual(row[12], "NA")
 
     def test_append_mode(self) -> None:
-        """Verify consecutive writes in append mode do not duplicate header and increment rows correctly."""
+        """Verify consecutive writes in append mode do not duplicate header."""
         csv_path = self.test_dir / "test_append.csv"
 
         config = ExperimentConfig(
@@ -236,7 +236,7 @@ class TestSchemaIO(unittest.TestCase):
         self.assertTrue(args.dry_run)
 
     def test_runner_dry_run_main_execution(self) -> None:
-        """Verify running main() with --dry-run generates valid CSV with both success and abort rows."""
+        """Verify main() with --dry-run generates valid CSV with success and abort rows."""
         target_csv = self.test_dir / "dry_run_output.csv"
         argv = [
             "--f0", "500",
