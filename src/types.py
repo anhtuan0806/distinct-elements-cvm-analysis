@@ -81,4 +81,3 @@ class CVMResult:
     max_buffer_size: int
     halving_count: int
     error_msg: str | None = None
-

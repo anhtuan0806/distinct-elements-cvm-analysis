@@ -98,11 +98,12 @@ Ví dụ gọi từ Python tại thư mục gốc repo:
 import subprocess
 
 result = subprocess.run(
-    [r"build\a1\cvm_core.exe", "--m", "4", "--eps", "0.05",
-     "--delta", "0.01", "--seed", "42"],
-    input="10\n20\n10\n30\n", text=True, capture_output=True, check=True,
+    [r"build\a1\cvm_core.exe", "--m", "4", "--eps", "0.05", "--delta", "0.01", "--seed", "42"],
+    input="10\n20\n10\n30\n",
+    text=True,
+    capture_output=True,
+    check=True,
 )
-print(result.stdout, end="")  # 3,FALSE,3,0
 ```
 
 Chạy thử trực tiếp trong PowerShell:

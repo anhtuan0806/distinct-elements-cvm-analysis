@@ -9,7 +9,7 @@ from pathlib import Path
 
 from runner import main
 from src.cli import args_to_config, build_parser, parse_args
-from src.csv_writer import CSVReportWriter, compute_rel_error, format_csv_record
+from src.csv_writer import CSVReportWriter, compute_rel_error
 from src.types import CSV_COLUMNS, CSV_HEADER, CVMResult, ExperimentConfig
 
 
@@ -26,9 +26,9 @@ class TestSchemaIO(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_csv_header_and_columns_count(self) -> None:
-        """Verify new CSV file contains exactly 13 columns matching the exact header."""
+        """Verify the new file contains the specified header with exactly 13 columns."""
         csv_path = self.test_dir / "test_header.csv"
-        writer = CSVReportWriter(csv_path)
+        CSVReportWriter(csv_path)
 
         # File must exist
         self.assertTrue(csv_path.exists())
@@ -62,7 +62,7 @@ class TestSchemaIO(unittest.TestCase):
         self.assertEqual(tuple(cols), CSV_COLUMNS)
 
     def test_write_success_record(self) -> None:
-        """Verify successful record format: numeric precision, FALSE flag, and rel_error."""
+        """Verify precision, the FALSE abort flag, and relative error for a success row."""
         csv_path = self.test_dir / "test_success.csv"
         writer = CSVReportWriter(csv_path)
 
@@ -90,21 +90,21 @@ class TestSchemaIO(unittest.TestCase):
             reader = list(csv.reader(f))
 
         self.assertEqual(len(reader), 2)  # Header + 1 record
-        header, row = reader[0], reader[1]
+        row = reader[1]
 
         self.assertEqual(len(row), 13)
         self.assertEqual(row[0], "100000")  # m
-        self.assertEqual(row[1], "50000")   # n
-        self.assertEqual(row[2], "10000")   # F0
-        self.assertEqual(row[3], "0.05")    # epsilon
-        self.assertEqual(row[4], "0.01")    # delta
-        self.assertEqual(row[5], "42")      # seed
-        self.assertEqual(row[6], "9980.50") # estimate (.2f)
-        self.assertEqual(row[7], "FALSE")   # abort
+        self.assertEqual(row[1], "50000")  # n
+        self.assertEqual(row[2], "10000")  # F0
+        self.assertEqual(row[3], "0.05")  # epsilon
+        self.assertEqual(row[4], "0.01")  # delta
+        self.assertEqual(row[5], "42")  # seed
+        self.assertEqual(row[6], "9980.50")  # estimate (.2f)
+        self.assertEqual(row[7], "FALSE")  # abort
         self.assertEqual(row[8], "12.346")  # runtime_ms (.3f rounded)
-        self.assertEqual(row[9], "1024.79") # peak_memory_kb (.2f rounded)
-        self.assertEqual(row[10], "1200")   # max_buffer_size
-        self.assertEqual(row[11], "4")      # halving_count
+        self.assertEqual(row[9], "1024.79")  # peak_memory_kb (.2f rounded)
+        self.assertEqual(row[10], "1200")  # max_buffer_size
+        self.assertEqual(row[11], "4")  # halving_count
 
         # Relative error: |9980.50 - 10000| / 10000 = 19.5 / 10000 = 0.001950
         expected_rel_error = f"{abs(9980.50 - 10000) / 10000:.6f}"
@@ -146,7 +146,7 @@ class TestSchemaIO(unittest.TestCase):
         self.assertEqual(row[12], "NA")
 
     def test_append_mode(self) -> None:
-        """Verify consecutive writes in append mode do not duplicate header."""
+        """Verify appending preserves every row and does not duplicate the header."""
         csv_path = self.test_dir / "test_append.csv"
 
         config = ExperimentConfig(
@@ -217,13 +217,20 @@ class TestSchemaIO(unittest.TestCase):
     def test_cli_parser_custom_args(self) -> None:
         """Verify CLI parses customized arguments properly."""
         custom_argv = [
-            "--m", "5000",
-            "--n", "2000",
-            "--f0", "800",
-            "--eps", "0.02",
-            "--delta", "0.005",
-            "--seed", "999",
-            "--out", str(self.test_dir / "custom.csv"),
+            "--m",
+            "5000",
+            "--n",
+            "2000",
+            "--f0",
+            "800",
+            "--eps",
+            "0.02",
+            "--delta",
+            "0.005",
+            "--seed",
+            "999",
+            "--out",
+            str(self.test_dir / "custom.csv"),
             "--dry-run",
         ]
         args = parse_args(custom_argv)
@@ -236,13 +243,17 @@ class TestSchemaIO(unittest.TestCase):
         self.assertTrue(args.dry_run)
 
     def test_runner_dry_run_main_execution(self) -> None:
-        """Verify main() with --dry-run generates valid CSV with success and abort rows."""
+        """Verify --dry-run generates valid CSV with both success and abort rows."""
         target_csv = self.test_dir / "dry_run_output.csv"
         argv = [
-            "--f0", "500",
-            "--m", "2000",
-            "--n", "1000",
-            "--out", str(target_csv),
+            "--f0",
+            "500",
+            "--m",
+            "2000",
+            "--n",
+            "1000",
+            "--out",
+            str(target_csv),
             "--dry-run",
         ]
         exit_code = main(argv)
@@ -256,10 +267,9 @@ class TestSchemaIO(unittest.TestCase):
         self.assertEqual(len(rows), 3)
         self.assertEqual(rows[0], list(CSV_COLUMNS))
         self.assertEqual(rows[1][7], "FALSE")  # Mock success
-        self.assertEqual(rows[2][7], "TRUE")   # Mock abort
-        self.assertEqual(rows[2][12], "NA")    # Mock abort rel_error
+        self.assertEqual(rows[2][7], "TRUE")  # Mock abort
+        self.assertEqual(rows[2][12], "NA")  # Mock abort rel_error
 
 
 if __name__ == "__main__":
     unittest.main()
-

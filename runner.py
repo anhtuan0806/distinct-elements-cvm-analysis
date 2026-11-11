@@ -4,10 +4,8 @@ import logging
 import sys
 from pathlib import Path
 
-from src.algorithms.base import CVMA1Algorithm
 from src.cli import args_to_config, parse_args
 from src.csv_writer import CSVReportWriter, compute_rel_error
-from src.generators.base import SyntheticStreamGenerator
 from src.types import CVMResult, ExperimentConfig
 
 logger = logging.getLogger("cvm_runner")
@@ -64,40 +62,6 @@ def run_dry_run(config: ExperimentConfig, writer: CSVReportWriter) -> None:
     logger.info("Dry-run complete. Verified schema integrity on: %s", writer.filepath)
 
 
-def run_benchmark(config: ExperimentConfig, writer: CSVReportWriter) -> CVMResult:
-    logger.info(
-        "Starting benchmark execution: m=%d, n=%d, F0=%d, eps=%.4f, delta=%.4f, seed=%d",
-        config.m,
-        config.n,
-        config.f0,
-        config.epsilon,
-        config.delta,
-        config.seed,
-    )
-
-    generator = SyntheticStreamGenerator(config)
-    algorithm = CVMA1Algorithm(config)
-
-    logger.info("Streaming tokens to CVM-A1 core engine...")
-    result = algorithm.process_stream(generator.generate())
-
-    writer.write_record(config, result)
-    rel_err_str = compute_rel_error(config.f0, result.estimate, result.abort)
-    logger.info(
-        "Benchmark completed - Estimate: %.2f (F0: %d), Abort: %s, RelError: %s, "
-        "Runtime: %.3f ms, PeakMem: %.2f KB, MaxBuffer: %d, Halvings: %d",
-        result.estimate,
-        config.f0,
-        result.abort,
-        rel_err_str,
-        result.runtime_ms,
-        result.peak_memory_kb,
-        result.max_buffer_size,
-        result.halving_count,
-    )
-    return result
-
-
 def main(argv: list[str] | None = None) -> int:
     configure_logging()
     args = parse_args(argv)
@@ -114,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         run_dry_run(config, writer)
     else:
-        run_benchmark(config, writer)
+        logger.info("Vui lòng sử dụng cờ --dry-run để chạy kiểm thử schema CSV.")
 
     return 0
 
