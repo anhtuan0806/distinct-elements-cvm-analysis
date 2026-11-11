@@ -1,12 +1,11 @@
 #include "cvm/a1.hpp"
+#include "cvm/csv_output.hpp"
 
 #include <charconv>
+#include <chrono>
 #include <cstdint>
 #include <exception>
-#include <iomanip>
 #include <iostream>
-#include <limits>
-#include <locale>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -20,6 +19,7 @@ struct Options {
     std::optional<double> epsilon;
     std::optional<double> delta;
     std::optional<std::uint64_t> seed;
+    std::optional<cvm::OutputFormat> output_format;
 };
 
 template <typename Number>
@@ -47,7 +47,8 @@ Options parse_options(int argc, char* argv[]) {
     Options options;
     for (int i = 1; i < argc; ++i) {
         const std::string name = argv[i];
-        if (name != "--m" && name != "--eps" && name != "--delta" && name != "--seed") {
+        if (name != "--m" && name != "--eps" && name != "--delta" && name != "--seed" &&
+            name != "--output-format") {
             throw std::invalid_argument("unknown argument " + name);
         }
         if (i + 1 == argc) {
@@ -60,8 +61,16 @@ Options parse_options(int argc, char* argv[]) {
             set_option(options.epsilon, value, name);
         } else if (name == "--delta") {
             set_option(options.delta, value, name);
-        } else {
+        } else if (name == "--seed") {
             set_option(options.seed, value, name);
+        } else {
+            if (options.output_format.has_value()) {
+                throw std::invalid_argument("duplicate argument --output-format");
+            }
+            if (value != "csv-v2") {
+                throw std::invalid_argument("--output-format must be csv-v2 (omit for legacy CSV)");
+            }
+            options.output_format = cvm::OutputFormat::csv_v2;
         }
     }
     if (!options.m.has_value()) {
@@ -94,7 +103,10 @@ std::string_view trim_id(std::string_view line) {
 int main(int argc, char* argv[]) {
     try {
         const auto options = parse_options(argc, argv);
+        using Clock = std::chrono::steady_clock;
+        const auto init_start = Clock::now();
         cvm::A1 estimator(*options.m, *options.epsilon, *options.delta, *options.seed);
+        auto algorithm_duration = Clock::now() - init_start;
         std::string line;
         while (estimator.processed() < *options.m && !estimator.aborted()) {
             if (!std::getline(std::cin, line)) {
@@ -105,23 +117,21 @@ int main(int argc, char* argv[]) {
                                          " IDs; expected " + std::to_string(*options.m));
             }
             const auto label = "uint64 ID at line " + std::to_string(estimator.processed() + 1);
-            estimator.update(parse_number<std::uint64_t>(trim_id(line), label));
+            const auto id = parse_number<std::uint64_t>(trim_id(line), label);
+            const auto update_start = Clock::now();
+            estimator.update(id);
+            algorithm_duration += Clock::now() - update_start;
         }
 
+        const auto result_start = Clock::now();
         const auto result = estimator.result();
-        const bool aborted = result.status == cvm::A1Status::aborted;
-        // Keep the core's null estimate for abort; only the CSV adapter uses zero.
-        const double estimate = aborted ? 0.0 : result.estimate.value();
-        std::cout.imbue(std::locale::classic());
-        std::cout << std::setprecision(std::numeric_limits<double>::max_digits10)
-                  << estimate << ',' << (aborted ? "TRUE" : "FALSE") << ','
-                  << estimator.max_buffer_size() << ',' << estimator.halving_count() << '\n';
-        if (!std::cout) {
-            throw std::runtime_error("failed to write CSV to stdout");
-        }
+        algorithm_duration += Clock::now() - result_start;
+        const double runtime_ms = std::chrono::duration<double, std::milli>(algorithm_duration).count();
+        cvm::write_a1_csv(std::cout, estimator, result, runtime_ms,
+                          options.output_format.value_or(cvm::OutputFormat::legacy_csv));
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "cvm_core: " << error.what() << '\n';
+        std::cerr << "cvm_core: execution_error: " << error.what() << '\n';
         return 1;
     }
 }

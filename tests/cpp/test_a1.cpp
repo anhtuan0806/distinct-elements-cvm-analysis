@@ -1,10 +1,12 @@
 #include "cvm/a1.hpp"
+#include "cvm/csv_output.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -154,6 +156,13 @@ void retaining_every_element_aborts_without_retry() {
     const auto result = estimator.result();
     require(result.status == cvm::A1Status::aborted, "expected algorithmic abort status");
     require(!result.estimate.has_value(), "abort must not contain a numeric estimate");
+    std::ostringstream csv_v2;
+    cvm::write_a1_csv(csv_v2, estimator, result, 1.25, cvm::OutputFormat::csv_v2);
+    require(csv_v2.str() == "algorithm_abort,,1.25,166,1,166\n",
+            "csv-v2 abort must have six columns and an EMPTY estimate");
+    std::ostringstream legacy;
+    cvm::write_a1_csv(legacy, estimator, result, 1.25, cvm::OutputFormat::legacy_csv);
+    require(legacy.str() == "0,TRUE,166,1\n", "legacy abort must keep the zero placeholder");
     require_throws<std::logic_error>([&estimator] { estimator.update(999); },
                                      "update after abort should be rejected");
     require(estimator.processed() == paper_threshold, "update changed aborted state");
@@ -165,10 +174,10 @@ void retaining_every_element_aborts_without_retry() {
 
 void metrics_accumulate_across_multiple_halvings() {
     ScriptedRandom random;
-    random.append(0.5, false, paper_threshold - 1);  // First pass keeps all but one.
+    random.append(0.5, false, paper_threshold - 1);
     random.append(0.5, true, 1);
-    random.append(0.5, true, 1);                    // Next ID refills the sample.
-    random.append(0.5, true, paper_threshold);      // Second pass discards everything.
+    random.append(0.5, true, 1);
+    random.append(0.5, true, paper_threshold);
     random.append(0.25, false, static_cast<std::size_t>(test_m) - paper_threshold - 1);
     cvm::A1 estimator(test_m, test_epsilon, test_delta, 42,
                       [&random](double p) { return random(p); });
@@ -197,6 +206,9 @@ void same_seed_reproduces_the_streaming_state() {
         require(first.sampling_probability() == second.sampling_probability(),
                 "same seed gave different sampling probabilities");
         require(first.sample_size() == second.sample_size(), "same seed gave different sizes");
+        require(first.max_buffer_size() == second.max_buffer_size(), "same seed gave different peaks");
+        require(first.halving_count() == second.halving_count(), "same seed gave different halving counts");
+        require(first.threshold() == second.threshold(), "same parameters gave different thresholds");
         if (first.aborted()) {
             break;
         }
@@ -267,6 +279,43 @@ void stream_length_is_enforced() {
     require_estimate(estimator, 1.0);
 }
 
+void all_duplicate_stream_is_exact() {
+    ScriptedRandom random;
+    cvm::A1 estimator(1024, 0.9, 0.9, 42, [&random](double p) { return random(p); });
+    for (std::uint64_t i = 0; i < 1024; ++i) {
+        estimator.update(17);
+    }
+    require_estimate(estimator, 1.0);
+    require(estimator.max_buffer_size() == 1 && estimator.halving_count() == 0,
+            "all-duplicate stream must retain one ID without thinning");
+    random.require_consumed();
+}
+
+void all_distinct_stream_is_exact_below_threshold() {
+    ScriptedRandom random;
+    cvm::A1 estimator(64, 0.9, 0.9, 42, [&random](double p) { return random(p); });
+    for (std::uint64_t id = 0; id < 64; ++id) {
+        estimator.update(id);
+    }
+    require_estimate(estimator, 64.0);
+    require(estimator.max_buffer_size() == 64 && estimator.halving_count() == 0,
+            "all-distinct stream below threshold must keep every ID");
+    random.require_consumed();
+}
+
+void repeating_stream_counts_distinct_ids() {
+    ScriptedRandom random;
+    cvm::A1 estimator(512, 0.9, 0.9, 42, [&random](double p) { return random(p); });
+    for (std::uint64_t i = 0; i < 512; ++i) {
+        estimator.update(i % 8);
+    }
+    require_estimate(estimator, 8.0);
+    require(estimator.processed() == 512 && estimator.max_buffer_size() == 8 &&
+                estimator.halving_count() == 0,
+            "repeating stream must count all updates but keep only eight IDs");
+    random.require_consumed();
+}
+
 }  // namespace
 
 int main() {
@@ -283,6 +332,9 @@ int main() {
         {"extreme_valid_inputs_do_not_overflow_the_logarithm",
          extreme_valid_inputs_do_not_overflow_the_logarithm},
         {"stream_length_is_enforced", stream_length_is_enforced},
+        {"all_duplicate_stream_is_exact", all_duplicate_stream_is_exact},
+        {"all_distinct_stream_is_exact_below_threshold", all_distinct_stream_is_exact_below_threshold},
+        {"repeating_stream_counts_distinct_ids", repeating_stream_counts_distinct_ids},
     };
     std::size_t failed = 0;
     for (const auto& test : tests) {
