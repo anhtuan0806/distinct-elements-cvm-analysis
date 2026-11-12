@@ -162,7 +162,7 @@ void retaining_every_element_aborts_without_retry() {
             "csv-v2 abort must have six columns and an EMPTY estimate");
     std::ostringstream legacy;
     cvm::write_a1_csv(legacy, estimator, result, 1.25, cvm::OutputFormat::legacy_csv);
-    require(legacy.str() == "0,TRUE,166,1\n", "legacy abort must keep the zero placeholder");
+    require(legacy.str() == ",TRUE,166,1\n", "legacy abort must have an empty estimate");
     require_throws<std::logic_error>([&estimator] { estimator.update(999); },
                                      "update after abort should be rejected");
     require(estimator.processed() == paper_threshold, "update changed aborted state");
