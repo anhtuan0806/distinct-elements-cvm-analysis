@@ -1,0 +1,15 @@
+{
+  "data_source": "synthetic_mock",
+  "execution_mode": "dry_run",
+  "target_csv": "dry_run.csv",
+  "records_count": 2,
+  "schema_version": "P0",
+  "columns_count": 24,
+  "generated_at": "2026-11-12T14:51:03.236809+00:00",
+  "environment": {
+    "os": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+    "python": "3.14.4",
+    "compiler": "unknown",
+    "build_flags": "none"
+  }
+}

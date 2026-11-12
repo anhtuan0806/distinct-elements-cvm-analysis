@@ -89,8 +89,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--out",
         type=str,
-        default="results/raw_benchmark.csv",
-        help="Output CSV file path to store benchmark metrics.",
+        default="results/real/raw_benchmark.csv",
+        help="Output CSV file path to store benchmark metrics (defaults to "
+        "results/real/raw_benchmark.csv for real runs, or "
+        "results/synthetic/dry_run.csv for dry-runs).",
     )
     parser.add_argument(
         "--dry-run",

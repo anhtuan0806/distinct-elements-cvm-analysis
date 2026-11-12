@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -271,7 +272,7 @@ class TestSchemaIO(unittest.TestCase):
         self.assertEqual(args.workload, "uniform")
         self.assertEqual(args.trial, 1)
         self.assertEqual(args.trials, 1)
-        self.assertEqual(args.out, "results/raw_benchmark.csv")
+        self.assertEqual(args.out, "results/real/raw_benchmark.csv")
         self.assertFalse(args.dry_run)
 
         config = args_to_config(args)
@@ -360,6 +361,44 @@ class TestSchemaIO(unittest.TestCase):
         self.assertEqual(rows[2][13], "")  # null estimate
         self.assertEqual(rows[2][19], "")  # null signed_rel_error
         self.assertEqual(rows[2][20], "")  # null abs_rel_error
+
+        # Schema distinctly marks synthetic dry-run rows
+        self.assertEqual(rows[1][1], "CVM-A1-dryrun")
+        self.assertEqual(rows[2][1], "CVM-A1-dryrun")
+
+        # Metadata sidecar verification
+        meta_json = target_csv.with_suffix(".metadata.json")
+        self.assertTrue(meta_json.exists())
+        with open(meta_json, mode="r", encoding="utf-8") as mf:
+            meta = json.load(mf)
+        self.assertEqual(meta["data_source"], "synthetic_mock")
+        self.assertEqual(meta["execution_mode"], "dry_run")
+
+    def test_default_output_routing_and_metadata(self) -> None:
+        """Verify real CLI invocation generates companion metadata with data_source='real'."""
+        target_csv = self.test_dir / "real_run.csv"
+        argv = [
+            "--f0",
+            "50",
+            "--m",
+            "100",
+            "--n",
+            "80",
+            "--out",
+            str(target_csv),
+            "--trials",
+            "1",
+        ]
+        exit_code = main(argv)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(target_csv.exists())
+
+        meta_json = target_csv.with_suffix(".metadata.json")
+        self.assertTrue(meta_json.exists())
+        with open(meta_json, mode="r", encoding="utf-8") as mf:
+            meta = json.load(mf)
+        self.assertEqual(meta["data_source"], "real")
+        self.assertEqual(meta["execution_mode"], "benchmark")
 
 
 if __name__ == "__main__":

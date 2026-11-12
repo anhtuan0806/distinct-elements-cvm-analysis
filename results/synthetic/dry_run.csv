@@ -1,0 +1,3 @@
+run_id,algorithm,workload,trial,m,n,F0,epsilon,delta,s,seed_generator,seed_algorithm,status,estimate,algorithm_runtime_ms,end_to_end_runtime_ms,peak_sample_size,halving_count,process_peak_memory_bytes,signed_rel_error,abs_rel_error,env_os,compiler,build_flags
+2a0563cc-c9ee-4df6-a37f-cf33e538b2cf,CVM-A1-dryrun,uniform,1,100000,50000,10000,0.05,0.01,126017,42,42,success,9950.00,10.234,12.345,1200,4,1048576,-0.005000,0.005000,Linux-7.0.0-38-generic,unknown,none
+2a0563cc-c9ee-4df6-a37f-cf33e538b2cf,CVM-A1-dryrun,uniform,1,100000,50000,10000,0.05,0.01,126017,42,42,algorithm_abort,,1.123,1.234,500,1,524288,,,Linux-7.0.0-38-generic,unknown,none
