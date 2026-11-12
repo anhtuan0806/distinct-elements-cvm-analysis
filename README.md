@@ -33,17 +33,17 @@ phân phối yêu cầu và ghi nhận kết quả vào file CSV chuẩn 24 cộ
 
 ### 1. Chạy một cấu hình đơn lẻ
 ```bash
-python3 runner.py --m 10000 --n 5000 --f0 3000 --eps 0.05 --delta 0.01 --workload uniform --out results/raw_benchmark.csv
+python3 runner.py --m 10000 --n 5000 --f0 3000 --eps 0.05 --delta 0.01 --workload uniform --out results/real/phase1.csv
 ```
 
 ### 2. Chạy hàng loạt thử nghiệm (Multi-trial batch)
 ```bash
-python3 runner.py --m 10000 --n 5000 --f0 3000 --trials 5 --workload zipf --out results/raw_benchmark.csv
+python3 runner.py --m 10000 --n 5000 --f0 3000 --trials 5 --workload zipf --out results/real/phase1.csv
 ```
 
 ### 3. Chạy chế độ kiểm thử schema nhanh (Dry-run)
 ```bash
-python3 runner.py --dry-run --out results/schema_check.csv
+python3 runner.py --dry-run --out results/synthetic/phase1-schema.csv
 ```
 
 ## Cấu trúc dữ liệu RAW CSV (24 Cột Chuẩn P0)
@@ -53,7 +53,7 @@ Dữ liệu benchmark được ghi nhận với đầy đủ 24 trường:
 - `algorithm_runtime_ms`: C++ cộng thời gian khởi tạo A1, xử lý từng ID đã parse và lấy kết quả.
 - `end_to_end_runtime_ms`: Do Python đo wall-clock toàn bộ chu trình khởi tạo và truyền pipe.
 - `peak_sample_size`: Số phần tử lớn nhất trong bộ nhớ đệm tập mẫu ($|X| \le s$).
-- `process_peak_memory_bytes`: Peak Resident Set Size (RSS) của tiến trình C++ đo qua OS API.
+- `process_peak_memory_bytes`: Peak RSS theo tiến trình C++ (bytes), để trống nếu không đo được.
 - `signed_rel_error` & `abs_rel_error`: Sai số tương đối có dấu và trị tuyệt đối; để rỗng khi thất bại hoặc $F_0=0$.
 
 ## Tự đánh giá hạn chế của phép đo (Measurement Limitations)
@@ -68,6 +68,7 @@ Dữ liệu benchmark được ghi nhận với đầy đủ 24 trường:
 ## Tài liệu
 
 - [Cài đặt, build, chạy và kiểm thử CVM-A1](docs/README.md)
+- [Runner TV3: RAW, resume, provenance và đo RAM](docs/tv3-runner.md)
 - [Kết quả kiểm thử P0 GĐ1](docs/cvm-a1-p0-evidence.md)
 - [Kiến trúc & Luồng dữ liệu (Current Flow)](README_CURRENT_FLOW.md)
 - [Bảng tiến độ công việc (Task Roadmap)](README_TASKS.md)

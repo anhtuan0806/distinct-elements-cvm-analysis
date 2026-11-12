@@ -1,236 +1,211 @@
-"""Benchmark runner executing CVM-A1 pipeline end-to-end and writing raw CSV reports."""
+"""Run reproducible CVM-A1 trials and record their RAW data and provenance."""
 
 from __future__ import annotations
 
+import csv
 import dataclasses
-import json
+import hashlib
 import logging
 import platform
+import subprocess
 import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from src.benchmark_report import BenchmarkReport, resolve_output
 from src.cli import args_to_config, parse_args
-from src.csv_writer import CSVReportWriter, compute_relative_errors
-from src.cvm.build import detect_compiler_info
-from src.cvm.executor import run_cvm_a1_core
+from src.csv_writer import CSVReportWriter
+from src.cvm.build import PROJECT_ROOT, binary_identity
+from src.cvm.executor import resolve_core_binary, run_cvm_a1_core
 from src.stream_generator import Distribution, StreamConfig, generate_stream
-from src.types import CSV_COLUMNS, CVMResult, ExperimentConfig, ExperimentStatus
+from src.types import CVMResult, ExperimentConfig, ExperimentStatus
 
 logger = logging.getLogger("cvm_runner")
 
 
-def configure_logging(verbose: bool = True) -> None:
-    """Initialize logging format and log levels."""
-    log_level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+def _git_commit() -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=PROJECT_ROOT,
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _batch(config: ExperimentConfig, count: int, mode: str, binary_info: dict) -> dict:
+    generator_sha = hashlib.sha256(
+        (PROJECT_ROOT / "src/stream_generator.py").read_bytes()
+    ).hexdigest()
+    source = hashlib.sha256()
+    paths = sorted(
+        [
+            PROJECT_ROOT / "runner.py",
+            *(PROJECT_ROOT / "src").rglob("*.py"),
+            *(PROJECT_ROOT / "src").rglob("*.cpp"),
+            *(PROJECT_ROOT / "src").rglob("*.hpp"),
+        ]
     )
+    for path in paths:
+        source.update(path.relative_to(PROJECT_ROOT).as_posix().encode("utf-8") + b"\0")
+        source.update(hashlib.sha256(path.read_bytes()).digest())
 
-
-def write_metadata_file(
-    csv_path: Path,
-    data_source: str,
-    execution_mode: str,
-    records_count: int,
-    compiler: str = "",
-    build_flags: str = "",
-) -> Path:
-    """Generate companion JSON metadata file documenting dataset provenance."""
-    meta_path = csv_path.with_suffix(".metadata.json")
-    meta_path.parent.mkdir(parents=True, exist_ok=True)
-    metadata = {
-        "data_source": data_source,
-        "execution_mode": execution_mode,
-        "target_csv": csv_path.name,
-        "records_count": records_count,
-        "schema_version": "P0",
-        "columns_count": len(CSV_COLUMNS),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+    python = platform.python_version()
+    configuration = dataclasses.asdict(config)
+    configuration.pop("run_id")
+    return {
+        "batch_id": str(uuid.uuid4()),
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "git_commit": _git_commit(),
+        "source_tree_sha256": source.hexdigest(),
+        "generator_sha256": generator_sha,
+        "configuration": configuration,
+        "requested_trials": count,
         "environment": {
             "os": platform.platform(),
-            "python": platform.python_version(),
-            "compiler": compiler or "unknown",
-            "build_flags": build_flags or "none",
+            "python": python,
+            "cpu": platform.processor() or platform.machine(),
+            "memory_metric": "core_peak_resident_bytes" if mode == "real" else None,
+            **binary_info,
         },
+        "version": [binary_info["binary_sha256"] or mode, generator_sha, python],
     }
-    with open(meta_path, mode="w", encoding="utf-8") as f:
-        json.dump(metadata, f, indent=2)
-        f.write("\n")
-    return meta_path
 
 
-def run_dry_run(config: ExperimentConfig, writer: CSVReportWriter) -> None:
-    """Execute mock verification mode to validate schema integrity without calling C++."""
-    logger.info("Executing DRY-RUN verification mode...")
-
-    # Distinctly mark synthetic dry-run data in the schema
-    dry_config = dataclasses.replace(
-        config,
-        algorithm="CVM-A1-dryrun",
-    )
-
-    # Case 1: Mock successful estimation
-    mock_estimate = float(round(dry_config.f0 * 0.995, 2)) if dry_config.f0 > 0 else 0.0
-    mock_success = CVMResult(
-        status=ExperimentStatus.SUCCESS,
-        estimate=mock_estimate,
-        algorithm_runtime_ms=10.234,
-        end_to_end_runtime_ms=12.345,
-        peak_sample_size=min(config.f0, 1200) if config.f0 > 0 else 64,
-        halving_count=4,
-        process_peak_memory_bytes=1024 * 1024,
-        error_msg=None,
-    )
-    writer.write_record(config, mock_success)
-    signed_err, abs_err = compute_relative_errors(
-        config.f0, mock_success.estimate, mock_success.status
-    )
-    logger.info(
-        "Successfully wrote mock SUCCESS record: F0=%d, estimate=%.2f, signed_err=%s, abs_err=%s",
-        config.f0,
-        mock_success.estimate,
-        signed_err,
-        abs_err,
-    )
-
-    # Case 2: Mock aborted execution (buffer capacity failure)
-    mock_abort = CVMResult(
-        status=ExperimentStatus.ALGORITHM_ABORT,
-        estimate=None,
-        algorithm_runtime_ms=1.123,
-        end_to_end_runtime_ms=1.234,
-        peak_sample_size=min(config.f0, 500) if config.f0 > 0 else 32,
-        halving_count=1,
-        process_peak_memory_bytes=512 * 1024,
-        error_msg="Simulated buffer overflow/underflow abort",
-    )
-    writer.write_record(dry_config, mock_abort)
-    logger.info(
-        "Successfully wrote mock ABORT record: status=algorithm_abort, estimate=null, reason=%s",
-        mock_abort.error_msg,
-    )
-
-    meta_file = write_metadata_file(
-        writer.filepath,
-        data_source="synthetic_mock",
-        execution_mode="dry_run",
-        records_count=2,
-    )
-    logger.info(
-        "Dry-run complete. Verified schema on: %s, metadata on: %s",
-        writer.filepath,
-        meta_file,
-    )
+def run_dry_run(config: ExperimentConfig, writer: BenchmarkReport) -> None:
+    for status, estimate in (
+        (ExperimentStatus.SUCCESS, float(round(config.f0 * 0.995, 2))),
+        (ExperimentStatus.ALGORITHM_ABORT, None),
+    ):
+        if not writer.is_complete(config, status):
+            writer.write_record(
+                dataclasses.replace(config, run_id=str(uuid.uuid4())),
+                CVMResult(status=status, estimate=estimate),
+            )
 
 
 def run_single_trial(
     config: ExperimentConfig,
-    writer: CSVReportWriter,
+    writer: CSVReportWriter | BenchmarkReport,
     compiler: str,
     build_flags: str,
+    *,
+    binary: Path | None = None,
+    binary_sha256: str | None = None,
 ) -> CVMResult:
-    """Generate reproducible stream, execute C++ CVM-A1 core, and commit RAW record."""
-    trial_cfg = dataclasses.replace(
-        config,
-        compiler=compiler,
-        build_flags=build_flags,
+    config = dataclasses.replace(config, compiler=compiler, build_flags=build_flags)
+    stream = generate_stream(
+        StreamConfig(
+            config.m,
+            config.n,
+            config.f0,
+            Distribution(config.workload),
+            config.seed_generator,
+        )
     )
+    result = run_cvm_a1_core(config, stream, binary)
+    if binary is not None and binary_sha256 is not None:
+        if hashlib.sha256(binary.read_bytes()).hexdigest() != binary_sha256:
+            raise ValueError("Core binary changed during the batch; trial was not recorded")
+    writer.write_record(config, result)
 
-    dist_enum = Distribution(trial_cfg.workload)
-    stream_cfg = StreamConfig(
-        m=trial_cfg.m,
-        n=trial_cfg.n,
-        f0=trial_cfg.f0,
-        distribution=dist_enum,
-        seed=trial_cfg.seed_generator,
-    )
-
-    stream = generate_stream(stream_cfg)
-    result = run_cvm_a1_core(trial_cfg, stream)
-    writer.write_record(trial_cfg, result)
-
-    signed_err, abs_err = compute_relative_errors(trial_cfg.f0, result.estimate, result.status)
-    logger.info(
-        "Trial %d: status=%s, F0=%d, estimate=%s, signed_err=%s, abs_err=%s, "
-        "alg_time=%.3f ms, e2e_time=%.3f ms, peak_sample=%d, halvings=%d",
-        trial_cfg.trial,
-        result.status.value,
-        trial_cfg.f0,
-        f"{result.estimate:.2f}" if result.estimate is not None else "null",
-        signed_err or "null",
-        abs_err or "null",
-        result.algorithm_runtime_ms or 0.0,
-        result.end_to_end_runtime_ms or 0.0,
-        result.peak_sample_size,
-        result.halving_count,
-    )
+    if result.error_msg:
+        logger.error("Trial %d, status=%s: %s", config.trial, result.status.value, result.error_msg)
+    else:
+        logger.info(
+            "Trial %d, status=%s, estimate=%s, effective_s=%s, algorithm_ms=%s",
+            config.trial,
+            result.status.value,
+            result.estimate,
+            result.effective_s,
+            result.algorithm_runtime_ms,
+        )
     return result
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI Entrypoint coordinating benchmark execution."""
-    configure_logging()
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     args = parse_args(argv)
+    mode = "synthetic_mock" if args.dry_run else "real"
 
     try:
-        base_config = args_to_config(args)
-    except ValueError as exc:
-        logger.error("Configuration validation error: %s", exc)
-        return 1
+        base = args_to_config(args)
+        if args.trials < 1:
+            raise ValueError("--trials must be positive")
+        if not args.dry_run:
+            last_seed = max(base.seed_generator, base.seed_algorithm) + args.trials - 1
+            if last_seed >= 2**64:
+                raise ValueError("Batch seeds must fit in uint64")
+            StreamConfig(
+                base.m,
+                base.n,
+                base.f0,
+                Distribution(base.workload),
+                base.seed_generator,
+            )
 
-    if args.dry_run and args.out in (
-        None,
-        "results/real/raw_benchmark.csv",
-        "results/raw_benchmark.csv",
-    ):
-        out_path = Path("results/synthetic/dry_run.csv")
-    elif args.out is not None:
-        out_path = Path(args.out)
-    else:
-        out_path = Path("results/real/raw_benchmark.csv")
-
-    writer = CSVReportWriter(out_path)
-
-    if args.dry_run:
-        run_dry_run(base_config, writer)
-        return 0
-
-    compiler, build_flags = detect_compiler_info()
-    num_trials = getattr(args, "trials", 1)
-
-    logger.info(
-        "Starting CVM benchmark: workload=%s, m=%d, n=%d, F0=%d, eps=%.4f, delta=%.4f, trials=%d",
-        base_config.workload,
-        base_config.m,
-        base_config.n,
-        base_config.f0,
-        base_config.epsilon,
-        base_config.delta,
-        num_trials,
-    )
-
-    for trial_idx in range(1, num_trials + 1):
-        # Shift seeds deterministically across multi-trial batches
-        seed_offset = trial_idx - 1
-        trial_cfg = dataclasses.replace(
-            base_config,
-            trial=trial_idx,
-            run_id=str(uuid.uuid4()),
-            seed_generator=base_config.seed_generator + seed_offset,
-            seed_algorithm=base_config.seed_algorithm + seed_offset,
+        output = resolve_output(args.out, mode, PROJECT_ROOT)
+        binary = None if args.dry_run else resolve_core_binary()
+        info = (
+            {"binary_sha256": None, "compiler": "synthetic", "build_flags": "none"}
+            if binary is None
+            else binary_identity(binary)
         )
-        run_single_trial(trial_cfg, writer, compiler, build_flags)
+        if args.dry_run:
+            base = dataclasses.replace(
+                base,
+                algorithm="CVM-A1-dryrun",
+                compiler="synthetic",
+                build_flags="none",
+            )
 
-    logger.info(
-        "Benchmark complete. Recorded %d trial(s) to: %s",
-        num_trials,
-        writer.filepath,
-    )
-    return 0
+        batch = _batch(base, 2 if args.dry_run else args.trials, mode, info)
+        failed = False
+        with BenchmarkReport.open(output, mode, batch) as writer:
+            if args.dry_run:
+                run_dry_run(base, writer)
+                return 0
+            for offset in range(args.trials):
+                config = dataclasses.replace(
+                    base,
+                    trial=base.trial + offset,
+                    run_id=str(uuid.uuid4()),
+                    seed_generator=base.seed_generator + offset,
+                    seed_algorithm=base.seed_algorithm + offset,
+                )
+                if writer.is_complete(config):
+                    logger.info("Skipping completed trial %d", config.trial)
+                    continue
+                result = run_single_trial(
+                    config,
+                    writer,
+                    info["compiler"],
+                    info["build_flags"],
+                    binary=binary,
+                    binary_sha256=info["binary_sha256"],
+                )
+                failed |= result.status in (
+                    ExperimentStatus.EXECUTION_ERROR,
+                    ExperimentStatus.RESOURCE_FAILURE,
+                )
+        return 1 if failed else 0
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        KeyError,
+        ArithmeticError,
+        RuntimeError,
+        csv.Error,
+        subprocess.SubprocessError,
+    ) as exc:
+        stderr = getattr(exc, "stderr", None)
+        logger.error("Benchmark failed: %s%s", exc, f"\n{stderr.strip()}" if stderr else "")
+        return 1
 
 
 if __name__ == "__main__":

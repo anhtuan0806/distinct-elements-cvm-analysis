@@ -194,7 +194,7 @@ class TestE2EPipeline(unittest.TestCase):
         self.assertEqual(row[20], "")  # null abs_rel_error
 
     def test_append_preserves_previous_records(self) -> None:
-        """Verify consecutive benchmark executions append records without data loss."""
+        """Verify resume skips completed records without data loss."""
         out_csv = self.test_dir / "append_e2e.csv"
 
         argv1 = [
@@ -230,8 +230,8 @@ class TestE2EPipeline(unittest.TestCase):
         with open(out_csv, mode="r", encoding="utf-8") as f:
             lines = [line.strip() for line in f if line.strip()]
 
-        # 1 header + 2 records (session 1) + 2 records (session 2) = 5 lines
-        self.assertEqual(len(lines), 5)
+        # 1 header + 2 distinct completed trials, even after running the batch again.
+        self.assertEqual(len(lines), 3)
         self.assertEqual(lines[0], CSV_HEADER)
 
 

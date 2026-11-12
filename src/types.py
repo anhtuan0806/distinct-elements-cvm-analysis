@@ -114,6 +114,11 @@ class ExperimentConfig:
         if self.seed_algorithm < 0:
             raise ValueError(f"seed_algorithm must be non-negative, got {self.seed_algorithm}")
 
+        if max(self.seed_generator, self.seed_algorithm, self.m) >= 2**64:
+            raise ValueError("m and seeds must fit in uint64")
+        if self.n > 2**64:
+            raise ValueError("n must not exceed the number of uint64 values")
+
         # Compute threshold s if not explicitly provided
         if self.s is None:
             computed_s = compute_cvm_threshold(self.m, self.epsilon, self.delta)
@@ -152,6 +157,7 @@ class CVMResult:
         end_to_end_runtime_ms: Total wall-clock time from stream start to C++ completion.
         process_peak_memory_bytes: Peak resident set size (RSS) in bytes of the C++ process.
         error_msg: Optional error description or diagnostic message when aborted or failed.
+        effective_s: Threshold reported by the C++ Core, if available.
     """
 
     status: ExperimentStatus
@@ -162,6 +168,7 @@ class CVMResult:
     end_to_end_runtime_ms: float | None = None
     process_peak_memory_bytes: int | None = None
     error_msg: str | None = None
+    effective_s: int | None = None
 
     @property
     def abort(self) -> bool:
