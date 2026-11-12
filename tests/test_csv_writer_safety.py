@@ -106,7 +106,10 @@ class TestCSVWriterSafety(unittest.TestCase):
             return list(csv.reader(report))
 
     def test_rejects_incompatible_headers_without_changing_file(self) -> None:
-        for header in ["seed,estimate", CSV_HEADER.replace("run_id,algorithm,", "algorithm,run_id,")]:
+        for header in [
+            "seed,estimate",
+            CSV_HEADER.replace("run_id,algorithm,", "algorithm,run_id,"),
+        ]:
             with self.subTest(header=header):
                 original = (header + "\n42,20\n").encode()
                 self.filepath.write_bytes(original)

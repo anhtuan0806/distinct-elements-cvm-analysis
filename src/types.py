@@ -61,7 +61,8 @@ class ExperimentConfig:
         seed_generator: Random seed for deterministic stream generation.
         seed_algorithm: Random seed for CVM algorithm sampling decisions.
         s: Buffer capacity threshold (computed if None).
-        workload: Workload distribution name (e.g. uniform, skewed, zipf, all_distinct, all_duplicate).
+        workload: Workload distribution name
+            (e.g. uniform, skewed, zipf, all_distinct, all_duplicate).
         trial: Trial iteration index (1-based integer).
         algorithm: Algorithm identifier (default 'CVM-A1').
         run_id: Unique identifier for the benchmark run.

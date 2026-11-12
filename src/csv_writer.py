@@ -88,14 +88,10 @@ def format_csv_record(config: ExperimentConfig, result: CVMResult) -> list[str]:
         else ""
     )
     alg_runtime_str = (
-        f"{result.algorithm_runtime_ms:.3f}"
-        if result.algorithm_runtime_ms is not None
-        else ""
+        f"{result.algorithm_runtime_ms:.3f}" if result.algorithm_runtime_ms is not None else ""
     )
     e2e_runtime_str = (
-        f"{result.end_to_end_runtime_ms:.3f}"
-        if result.end_to_end_runtime_ms is not None
-        else ""
+        f"{result.end_to_end_runtime_ms:.3f}" if result.end_to_end_runtime_ms is not None else ""
     )
     peak_mem_str = (
         str(result.process_peak_memory_bytes)
