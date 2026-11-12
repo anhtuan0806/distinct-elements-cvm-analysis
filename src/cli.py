@@ -51,7 +51,40 @@ def build_parser() -> argparse.ArgumentParser:
         "--seed",
         type=int,
         default=42,
-        help="Random seed for deterministic stream generation.",
+        help="Default random seed applied to both generator and algorithm if not specified.",
+    )
+    parser.add_argument(
+        "--seed-gen",
+        type=int,
+        default=None,
+        dest="seed_gen",
+        help="Explicit random seed for synthetic stream generation.",
+    )
+    parser.add_argument(
+        "--seed-algo",
+        type=int,
+        default=None,
+        dest="seed_algo",
+        help="Explicit random seed for CVM algorithm sampling decisions.",
+    )
+    parser.add_argument(
+        "--workload",
+        type=str,
+        default="uniform",
+        choices=["all_duplicate", "all_distinct", "uniform", "skewed", "zipf"],
+        help="Workload distribution shape.",
+    )
+    parser.add_argument(
+        "--trial",
+        type=int,
+        default=1,
+        help="Trial execution index (1-based integer).",
+    )
+    parser.add_argument(
+        "--trials",
+        type=int,
+        default=1,
+        help="Total number of trials to run in batch mode.",
     )
     parser.add_argument(
         "--out",
@@ -77,11 +110,18 @@ def parse_args(args: Sequence[str] | None = None) -> argparse.Namespace:
 
 def args_to_config(args: argparse.Namespace) -> ExperimentConfig:
     """Convert parsed CLI arguments into a validated ExperimentConfig object."""
+    seed_gen = getattr(args, "seed_gen", None)
+    seed_algo = getattr(args, "seed_algo", None)
+    seed = getattr(args, "seed", 42)
+
     return ExperimentConfig(
         m=args.m,
         n=args.n,
         f0=args.f0,
         epsilon=args.eps,
         delta=args.delta,
-        seed=args.seed,
+        seed_generator=seed_gen if seed_gen is not None else seed,
+        seed_algorithm=seed_algo if seed_algo is not None else seed,
+        workload=getattr(args, "workload", "uniform"),
+        trial=getattr(args, "trial", 1),
     )
