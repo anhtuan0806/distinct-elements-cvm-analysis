@@ -109,7 +109,7 @@ def format_csv_record(config: ExperimentConfig, result: CVMResult) -> list[str]:
         str(config.f0),
         str(config.epsilon),
         str(config.delta),
-        str(config.s),
+        str(result.effective_s if result.effective_s is not None else config.s),
         str(config.seed_generator),
         str(config.seed_algorithm),
         result.status.value,
@@ -134,14 +134,17 @@ class CSVReportWriter:
     is separated before append; a malformed tail is left untouched for inspection.
     """
 
-    def __init__(self, filepath: Path | str) -> None:
+    def __init__(self, filepath: Path | str, *, initialize: bool = True) -> None:
         self.filepath: Path = Path(filepath).resolve()
         self.filepath.parent.mkdir(parents=True, exist_ok=True)
-        self._ensure_header()
+        if initialize:
+            self._ensure_header()
 
     def _ensure_header(self) -> None:
         """Initialize or validate the report while holding its exclusive lock."""
         with self._locked_report() as report:
+            if self.filepath.with_suffix(".metadata.json").exists():
+                raise ValueError("Use Runner to open a CSV with dataset metadata")
             if self._prepare_report(report):
                 report.flush()
                 os.fsync(report.fileno())
@@ -149,7 +152,7 @@ class CSVReportWriter:
     @contextmanager
     def _locked_report(self) -> Iterator[BinaryIO]:
         # a+b creates missing files without truncating another writer's records.
-        with open(self.filepath, mode="a+b") as report:
+        with open(self.filepath, mode="a+b", buffering=0) as report:
             fileno = report.fileno()
             if _HAS_FCNTL:
                 fcntl.flock(fileno, fcntl.LOCK_EX)
@@ -158,19 +161,23 @@ class CSVReportWriter:
                 finally:
                     fcntl.flock(fileno, fcntl.LOCK_UN)
             elif _HAS_MSVCRT:
-                cur_pos = report.tell()
+                # Use the actual descriptor offset, independent of buffered read-ahead.
                 report.seek(0)
                 msvcrt.locking(fileno, msvcrt.LK_LOCK, 1)
-                report.seek(cur_pos)
                 try:
                     yield report
-                finally:
-                    cur_pos = report.tell()
+                except BaseException:
+                    try:
+                        report.seek(0)
+                        msvcrt.locking(fileno, msvcrt.LK_UNLCK, 1)
+                    except OSError:
+                        pass  # Closing the handle releases the lock and preserves the error.
+                    raise
+                else:
                     report.seek(0)
                     msvcrt.locking(fileno, msvcrt.LK_UNLCK, 1)
-                    report.seek(cur_pos)
             else:
-                yield report
+                raise OSError("No supported CSV file-lock backend")
 
     def _parse_line(self, raw: bytes) -> list[str]:
         try:
@@ -243,6 +250,8 @@ class CSVReportWriter:
         buffer = StringIO(newline="")
         csv.writer(buffer).writerow(row)
         with self._locked_report() as report:
+            if self.filepath.with_suffix(".metadata.json").exists():
+                raise ValueError("Use Runner to append to a CSV with dataset metadata")
             self._prepare_report(report)
             report.write(buffer.getvalue().encode("utf-8"))
             report.flush()
