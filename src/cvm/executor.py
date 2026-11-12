@@ -45,23 +45,36 @@ def run_cvm_a1_core(
     ]
 
     t_start = time.perf_counter()
-    proc = subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
 
     try:
-        assert proc.stdin is not None
-        for item in stream:
-            proc.stdin.write(f"{item}\n")
-        proc.stdin.close()
-        stdout, stderr = proc.communicate()
-    except (OSError, ValueError) as exc:
-        proc.kill()
-        proc.communicate()
+        input_data = "".join(f"{item}\n" for item in stream)
+    except Exception as exc:
+        t_end = time.perf_counter()
+        return CVMResult(
+            status=ExperimentStatus.EXECUTION_ERROR,
+            estimate=None,
+            end_to_end_runtime_ms=(t_end - t_start) * 1000.0,
+            error_msg=f"Pipeline stream generation failure: {exc}",
+        )
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            stdout, stderr = proc.communicate(input=input_data)
+        except Exception:
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+            raise
+    except Exception as exc:
         t_end = time.perf_counter()
         return CVMResult(
             status=ExperimentStatus.EXECUTION_ERROR,

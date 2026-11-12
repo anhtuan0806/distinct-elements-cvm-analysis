@@ -102,6 +102,27 @@ class TestCVMCoreAdapter(unittest.TestCase):
         self.assertIsNotNone(result.algorithm_runtime_ms)
         self.assertGreater(result.algorithm_runtime_ms, 0.0)
 
+    def test_run_cvm_a1_core_broken_stream_generator(self) -> None:
+        def broken_gen():
+            yield 10
+            yield 20
+            raise RuntimeError("Generator stream broken")
+
+        config = ExperimentConfig(
+            m=5,
+            n=10,
+            f0=3,
+            epsilon=0.05,
+            delta=0.01,
+            seed_generator=42,
+            seed_algorithm=42,
+        )
+        result = run_cvm_a1_core(config, broken_gen(), self.binary_path)
+
+        self.assertEqual(result.status, ExperimentStatus.EXECUTION_ERROR)
+        self.assertIsNone(result.estimate)
+        self.assertIn("Generator stream broken", str(result.error_msg))
+
 
 if __name__ == "__main__":
     unittest.main()
