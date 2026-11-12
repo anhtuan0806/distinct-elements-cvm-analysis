@@ -102,9 +102,7 @@ def run_single_trial(
     result = run_cvm_a1_core(trial_cfg, stream)
     writer.write_record(trial_cfg, result)
 
-    signed_err, abs_err = compute_relative_errors(
-        trial_cfg.f0, result.estimate, result.status
-    )
+    signed_err, abs_err = compute_relative_errors(trial_cfg.f0, result.estimate, result.status)
     logger.info(
         "Trial %d: status=%s, F0=%d, estimate=%s, signed_err=%s, abs_err=%s, "
         "alg_time=%.3f ms, e2e_time=%.3f ms, peak_sample=%d, halvings=%d",
