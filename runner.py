@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
 import platform
 import sys
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.cli import args_to_config, parse_args
@@ -14,7 +16,7 @@ from src.csv_writer import CSVReportWriter, compute_relative_errors
 from src.cvm.build import detect_compiler_info
 from src.cvm.executor import run_cvm_a1_core
 from src.stream_generator import Distribution, StreamConfig, generate_stream
-from src.types import CVMResult, ExperimentConfig, ExperimentStatus
+from src.types import CSV_COLUMNS, CVMResult, ExperimentConfig, ExperimentStatus
 
 logger = logging.getLogger("cvm_runner")
 
@@ -123,50 +125,6 @@ def run_dry_run(config: ExperimentConfig, writer: CSVReportWriter) -> None:
         writer.filepath,
         meta_file,
     )
-
-
-def run_single_trial(
-    config: ExperimentConfig,
-    writer: CSVReportWriter,
-    compiler: str,
-    build_flags: str,
-) -> CVMResult:
-    """Generate reproducible stream, execute C++ CVM-A1 core, and commit RAW record."""
-    trial_cfg = dataclasses.replace(
-        config,
-        compiler=compiler,
-        build_flags=build_flags,
-    )
-
-    dist_enum = Distribution(trial_cfg.workload)
-    stream_cfg = StreamConfig(
-        m=trial_cfg.m,
-        n=trial_cfg.n,
-        f0=trial_cfg.f0,
-        distribution=dist_enum,
-        seed=trial_cfg.seed_generator,
-    )
-
-    stream = generate_stream(stream_cfg)
-    result = run_cvm_a1_core(trial_cfg, stream)
-    writer.write_record(trial_cfg, result)
-
-    signed_err, abs_err = compute_relative_errors(trial_cfg.f0, result.estimate, result.status)
-    logger.info(
-        "Trial %d: status=%s, F0=%d, estimate=%s, signed_err=%s, abs_err=%s, "
-        "alg_time=%.3f ms, e2e_time=%.3f ms, peak_sample=%d, halvings=%d",
-        trial_cfg.trial,
-        result.status.value,
-        trial_cfg.f0,
-        f"{result.estimate:.2f}" if result.estimate is not None else "null",
-        signed_err or "null",
-        abs_err or "null",
-        result.algorithm_runtime_ms or 0.0,
-        result.end_to_end_runtime_ms or 0.0,
-        result.peak_sample_size,
-        result.halving_count,
-    )
-    return result
 
 
 def run_single_trial(

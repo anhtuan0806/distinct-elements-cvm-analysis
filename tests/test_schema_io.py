@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -272,7 +271,7 @@ class TestSchemaIO(unittest.TestCase):
         self.assertEqual(args.workload, "uniform")
         self.assertEqual(args.trial, 1)
         self.assertEqual(args.trials, 1)
-        self.assertEqual(args.out, "results/raw_benchmark.csv")
+        self.assertEqual(args.out, "results/real/raw_benchmark.csv")
         self.assertFalse(args.dry_run)
 
         config = args_to_config(args)
