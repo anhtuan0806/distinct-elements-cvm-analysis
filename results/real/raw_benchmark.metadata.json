@@ -1,0 +1,15 @@
+{
+  "data_source": "real",
+  "execution_mode": "benchmark",
+  "target_csv": "raw_benchmark.csv",
+  "records_count": 3,
+  "schema_version": "P0",
+  "columns_count": 24,
+  "generated_at": "2026-11-12T14:51:34.724183+00:00",
+  "environment": {
+    "os": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+    "python": "3.14.4",
+    "compiler": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+    "build_flags": "-O3;-std=c++17"
+  }
+}

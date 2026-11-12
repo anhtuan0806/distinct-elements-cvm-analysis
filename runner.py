@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
+import platform
 import sys
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.cli import args_to_config, parse_args
@@ -13,7 +16,7 @@ from src.csv_writer import CSVReportWriter, compute_relative_errors
 from src.cvm.build import detect_compiler_info
 from src.cvm.executor import run_cvm_a1_core
 from src.stream_generator import Distribution, StreamConfig, generate_stream
-from src.types import CVMResult, ExperimentConfig, ExperimentStatus
+from src.types import CSV_COLUMNS, CVMResult, ExperimentConfig, ExperimentStatus
 
 logger = logging.getLogger("cvm_runner")
 
@@ -28,12 +31,50 @@ def configure_logging(verbose: bool = True) -> None:
     )
 
 
+def write_metadata_file(
+    csv_path: Path,
+    data_source: str,
+    execution_mode: str,
+    records_count: int,
+    compiler: str = "",
+    build_flags: str = "",
+) -> Path:
+    """Generate companion JSON metadata file documenting dataset provenance."""
+    meta_path = csv_path.with_suffix(".metadata.json")
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata = {
+        "data_source": data_source,
+        "execution_mode": execution_mode,
+        "target_csv": csv_path.name,
+        "records_count": records_count,
+        "schema_version": "P0",
+        "columns_count": len(CSV_COLUMNS),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "environment": {
+            "os": platform.platform(),
+            "python": platform.python_version(),
+            "compiler": compiler or "unknown",
+            "build_flags": build_flags or "none",
+        },
+    }
+    with open(meta_path, mode="w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2)
+        f.write("\n")
+    return meta_path
+
+
 def run_dry_run(config: ExperimentConfig, writer: CSVReportWriter) -> None:
     """Execute mock verification mode to validate schema integrity without calling C++."""
     logger.info("Executing DRY-RUN verification mode...")
 
+    # Distinctly mark synthetic dry-run data in the schema
+    dry_config = dataclasses.replace(
+        config,
+        algorithm="CVM-A1-dryrun",
+    )
+
     # Case 1: Mock successful estimation
-    mock_estimate = float(round(config.f0 * 0.995, 2)) if config.f0 > 0 else 0.0
+    mock_estimate = float(round(dry_config.f0 * 0.995, 2)) if dry_config.f0 > 0 else 0.0
     mock_success = CVMResult(
         status=ExperimentStatus.SUCCESS,
         estimate=mock_estimate,
@@ -67,13 +108,23 @@ def run_dry_run(config: ExperimentConfig, writer: CSVReportWriter) -> None:
         process_peak_memory_bytes=512 * 1024,
         error_msg="Simulated buffer overflow/underflow abort",
     )
-    writer.write_record(config, mock_abort)
+    writer.write_record(dry_config, mock_abort)
     logger.info(
         "Successfully wrote mock ABORT record: status=algorithm_abort, estimate=null, reason=%s",
         mock_abort.error_msg,
     )
 
-    logger.info("Dry-run complete. Verified schema integrity on: %s", writer.filepath)
+    meta_file = write_metadata_file(
+        writer.filepath,
+        data_source="synthetic_mock",
+        execution_mode="dry_run",
+        records_count=2,
+    )
+    logger.info(
+        "Dry-run complete. Verified schema on: %s, metadata on: %s",
+        writer.filepath,
+        meta_file,
+    )
 
 
 def run_single_trial(
@@ -131,7 +182,17 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("Configuration validation error: %s", exc)
         return 1
 
-    out_path = Path(args.out)
+    if args.dry_run and args.out in (
+        None,
+        "results/real/raw_benchmark.csv",
+        "results/raw_benchmark.csv",
+    ):
+        out_path = Path("results/synthetic/dry_run.csv")
+    elif args.out is not None:
+        out_path = Path(args.out)
+    else:
+        out_path = Path("results/real/raw_benchmark.csv")
+
     writer = CSVReportWriter(out_path)
 
     if args.dry_run:
