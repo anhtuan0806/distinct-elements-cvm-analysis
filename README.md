@@ -50,7 +50,7 @@ python3 runner.py --dry-run --out results/schema_check.csv
 Dữ liệu benchmark được ghi nhận với đầy đủ 24 trường:
 `run_id,algorithm,workload,trial,m,n,F0,epsilon,delta,s,seed_generator,seed_algorithm,status,estimate,algorithm_runtime_ms,end_to_end_runtime_ms,peak_sample_size,halving_count,process_peak_memory_bytes,signed_rel_error,abs_rel_error,env_os,compiler,build_flags`.
 
-- `algorithm_runtime_ms`: Do C++ tự đo bằng `std::chrono` bao quanh vòng lặp thuật toán.
+- `algorithm_runtime_ms`: C++ cộng thời gian khởi tạo A1, xử lý từng ID đã parse và lấy kết quả.
 - `end_to_end_runtime_ms`: Do Python đo wall-clock toàn bộ chu trình khởi tạo và truyền pipe.
 - `peak_sample_size`: Số phần tử lớn nhất trong bộ nhớ đệm tập mẫu ($|X| \le s$).
 - `process_peak_memory_bytes`: Peak Resident Set Size (RSS) của tiến trình C++ đo qua OS API.

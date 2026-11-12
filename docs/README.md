@@ -89,14 +89,15 @@ Bắt buộc truyền `--m`, `--eps`, `--delta`, `--seed` (mỗi tham số một
 dấu `+`/`-` hoặc nhiều ID trên một dòng. Chương trình xử lý tối đa `m` lượt đọc, tính
 cả ID lặp, và dừng ngay khi A1 abort; không đọc/kiểm tra phần dữ liệu còn lại.
 
-Không truyền `--output-format`: giữ nguyên **một dòng CSV 4 cột, không có header**
-cho runner TV3 hiện tại, đúng thứ tự:
+Khi bỏ `--output-format`, CLI xuất **một dòng CSV legacy 4 cột, không có header**
+theo thứ tự sau. Runner TV3 dùng `csv-v2`.
 
 ```text
 estimate,abort,max_buffer_size,halving_count
 ```
 
-- `estimate`: số ước lượng; khi abort dùng `0` làm giá trị giữ chỗ cho runner.
+- `estimate`: số ước lượng khi success, ô trống khi abort. Mã đọc legacy cũ từng
+  nhận `0` cần xử lý ô trống theo cờ `abort`.
 - `abort`: `TRUE` hoặc `FALSE`; abort vẫn là kết quả hợp lệ, exit code `0`.
 - `max_buffer_size`: số ID lớn nhất trong mẫu ngay sau khi thêm ID, **trước giảm mẫu**.
 - `halving_count`: tổng số lần chia đôi `p`, kể cả lần dẫn đến abort.
@@ -143,6 +144,11 @@ status,estimate,algorithm_runtime_ms,peak_sample_size,halving_count,s
 | `peak_sample_size` | Dùng `max_buffer_size()`: peak số ID trong mẫu, gồm lúc vừa đầy trước giảm mẫu. |
 | `halving_count` | Dùng `halving_count()`: số lần chia đôi p, gồm lượt dẫn tới abort. |
 | `s` | Dùng `threshold()`: `ceil((12 / epsilon²) * log2(8m / delta))` khi `m > 0`. |
+
+`s` là sức chứa kích hoạt giảm mẫu. TV3 cần đọc cột thứ sáu của stdout và dùng
+giá trị đó cho RAW CSV, hoặc xác thực nó bằng giá trị dự kiến trước khi ghi.
+Adapter hiện đọc được dòng 6 cột nhưng bỏ giá trị cột thứ sáu và ghi `s` từ Python.
+Quét `s` độc lập cho RQ1 là đề xuất P1 ngoài phạm vi GĐ1 hiện tại.
 
 Timer dùng `std::chrono::steady_clock`: cộng duration của ba phần rồi đổi sang ms.
 Mỗi ID được đọc và parse **trước** khi bắt đầu đo `update`; phép đo `result()` kết
@@ -192,6 +198,23 @@ timer; không dùng ngưỡng thời gian tuyệt đối sát trong unit test. T
 input/seed/epsilon/delta/m giống nhau phải cho cùng status, estimate, peak, halving
 và s; chỉ thời gian được phép thay đổi.
 
+### Kiểm thử tích hợp abort
+
+Từ thư mục gốc dự án, sau khi build `cvm_core`, dùng GCC hoặc MinGW để build
+fixture kiểm thử và gọi Runner. Ví dụ PowerShell với MinGW:
+
+```powershell
+g++ -std=c++17 -Wall -Wextra -Werror -pedantic -Isrc src/cvm/a1.cpp src/cvm_core.cpp -o build/a1/cvm_core.exe
+g++ -std=c++17 -Wall -Wextra -Werror -pedantic -Isrc src/cvm/a1.cpp tests/cpp/cvm_abort_fixture.cpp -o build/a1/cvm_abort_fixture.exe
+python -m tests.cpp.check_tv1_runner build/a1/cvm_core.exe build/a1/cvm_abort_fixture.exe
+```
+
+Trên Linux, có thể bỏ phần mở rộng `.exe`. Script dùng executable chuẩn cho lượt
+success và dùng executable fixture cho hai lượt abort. Fixture dùng `cvm::A1`
+và hàm xuất `csv-v2` của dự án, với `RandomDecision` điều khiển lần giảm mẫu đầu.
+Script chỉ thay đường dẫn binary khi gọi Runner. Generator, adapter, tiến trình
+C++ và bộ ghi RAW đều chạy. CSV kiểm thử nằm trong thư mục tạm.
+
 ### Chi phí thuật toán và bằng chứng P0
 
 Với thao tác bảng băm `std::unordered_set` có chi phí trung bình O(1), mỗi lượt đọc
@@ -204,5 +227,5 @@ giảm mẫu; không lưu toàn bộ stream. Đây không phải RSS hoặc số
 nếu mỗi ID cần log2(n) bit thì riêng phần lưu ID tương ứng O(s log n) bit.
 
 Checklist, lệnh đã chạy và kết quả thực tế được ghi tại
-[bằng chứng P0 GĐ1](cvm-a1-p0-evidence.md). Còn chờ TV3/nhóm ghép hợp đồng mới
-vào CSV thí nghiệm, xác nhận quy ước luồng rỗng và thống nhất CI C++.
+[bằng chứng P0 GĐ1](cvm-a1-p0-evidence.md). TV3 cần đối soát `s` từ C++ khi ghi
+RAW. Nhóm còn cần xác nhận quy ước luồng rỗng và thống nhất CI C++.
