@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import fcntl
 import multiprocessing
 import tempfile
 import threading
@@ -13,10 +12,18 @@ from concurrent.futures import ThreadPoolExecutor
 from multiprocessing.synchronize import Barrier, Event
 from pathlib import Path
 
-from src.csv_writer import CSVReportWriter
-from src.types import CSV_HEADER, CVMResult, ExperimentConfig
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # type: ignore[assignment]
 
-RECORD = "100,50,20,0.05,0.01,42,20.00,FALSE,1.000,1.00,10,1,0.000000"
+from src.csv_writer import CSVReportWriter
+from src.types import CSV_HEADER, CVMResult, ExperimentConfig, ExperimentStatus
+
+RECORD = (
+    "test-run-1,CVM-A1,uniform,1,100,50,20,0.05,0.01,23067,42,42,success,"
+    "20.00,1.000,1.000,10,1,1048576,0.000000,0.000000,Linux-Test,g++ 11.4,-O3"
+)
 
 
 def append_records(
@@ -32,8 +39,32 @@ def append_records(
     if barrier is not None:
         barrier.wait(timeout=10)
     writer = CSVReportWriter(filepath)
-    config = ExperimentConfig(100, 50, 20, 0.05, 0.01, seed)
-    result = CVMResult(20.0, False, 1.0, 1.0, 10, 1)
+    config = ExperimentConfig(
+        m=100,
+        n=50,
+        f0=20,
+        epsilon=0.05,
+        delta=0.01,
+        seed_generator=seed,
+        seed_algorithm=seed,
+        s=23067,
+        workload="uniform",
+        trial=1,
+        algorithm="CVM-A1",
+        run_id="test-run-1" if seed == 42 else f"run-{seed}",
+        env_os="Linux-Test",
+        compiler="g++ 11.4",
+        build_flags="-O3",
+    )
+    result = CVMResult(
+        status=ExperimentStatus.SUCCESS,
+        estimate=20.0,
+        algorithm_runtime_ms=1.0,
+        end_to_end_runtime_ms=1.0,
+        peak_sample_size=10,
+        halving_count=1,
+        process_peak_memory_bytes=1048576,
+    )
     for _ in range(count):
         writer.write_record(config, result)
 
@@ -43,15 +74,42 @@ class TestCSVWriterSafety(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
         self.filepath = Path(self.temp_dir.name) / "report.csv"
-        self.config = ExperimentConfig(100, 50, 20, 0.05, 0.01, 42)
-        self.result = CVMResult(20.0, False, 1.0, 1.0, 10, 1)
+        self.config = ExperimentConfig(
+            m=100,
+            n=50,
+            f0=20,
+            epsilon=0.05,
+            delta=0.01,
+            seed_generator=42,
+            seed_algorithm=42,
+            s=23067,
+            workload="uniform",
+            trial=1,
+            algorithm="CVM-A1",
+            run_id="test-run-1",
+            env_os="Linux-Test",
+            compiler="g++ 11.4",
+            build_flags="-O3",
+        )
+        self.result = CVMResult(
+            status=ExperimentStatus.SUCCESS,
+            estimate=20.0,
+            algorithm_runtime_ms=1.0,
+            end_to_end_runtime_ms=1.0,
+            peak_sample_size=10,
+            halving_count=1,
+            process_peak_memory_bytes=1048576,
+        )
 
     def read_rows(self) -> list[list[str]]:
         with self.filepath.open(encoding="utf-8", newline="") as report:
             return list(csv.reader(report))
 
     def test_rejects_incompatible_headers_without_changing_file(self) -> None:
-        for header in ["seed,estimate", CSV_HEADER.replace("m,n,", "n,m,")]:
+        for header in [
+            "seed,estimate",
+            CSV_HEADER.replace("run_id,algorithm,", "algorithm,run_id,"),
+        ]:
             with self.subTest(header=header):
                 original = (header + "\n42,20\n").encode()
                 self.filepath.write_bytes(original)
@@ -97,6 +155,8 @@ class TestCSVWriterSafety(unittest.TestCase):
         self.assertEqual(self.filepath.read_bytes(), original)
 
     def test_initialization_respects_another_process_file_lock(self) -> None:
+        if fcntl is None:
+            self.skipTest("fcntl not available on this platform")
         context = multiprocessing.get_context("spawn")
         ready = context.Event()
         process = context.Process(target=append_records, args=(str(self.filepath), 42, 1, ready))
@@ -141,8 +201,12 @@ class TestCSVWriterSafety(unittest.TestCase):
         rows = self.read_rows()
         self.assertEqual(rows[0], CSV_HEADER.split(","))
         self.assertEqual(len(rows), 41)
-        self.assertTrue(all(len(row) == 13 for row in rows))
-        self.assertEqual(Counter(row[5] for row in rows[1:]), {"0": 10, "1": 10, "2": 10, "3": 10})
+        self.assertTrue(all(len(row) == 24 for row in rows))
+        # row[11] is seed_algorithm
+        self.assertEqual(
+            Counter(row[11] for row in rows[1:]),
+            {"0": 10, "1": 10, "2": 10, "3": 10},
+        )
 
     def test_concurrent_threads_preserve_all_records(self) -> None:
         barrier = threading.Barrier(8)
@@ -156,5 +220,8 @@ class TestCSVWriterSafety(unittest.TestCase):
         rows = self.read_rows()
         self.assertEqual(rows[0], CSV_HEADER.split(","))
         self.assertEqual(len(rows), 41)
-        self.assertTrue(all(len(row) == 13 for row in rows))
-        self.assertEqual(Counter(row[5] for row in rows[1:]), {str(seed): 5 for seed in range(8)})
+        self.assertTrue(all(len(row) == 24 for row in rows))
+        self.assertEqual(
+            Counter(row[11] for row in rows[1:]),
+            {str(seed): 5 for seed in range(8)},
+        )
