@@ -31,39 +31,29 @@ pytest
 Chương trình `runner.py` tự động biên dịch lõi C++ (nếu chưa có), sinh luồng dữ liệu theo
 phân phối yêu cầu và ghi nhận kết quả vào file CSV chuẩn 24 cột.
 
-### 1. Phân định đường dẫn output & Nguồn dữ liệu (Provenance)
-Để đảm bảo tính nghiêm ngặt khoa học, dữ liệu đầu ra được tách biệt hoàn toàn:
-- **Dữ liệu thực nghiệm thật (`results/real/raw_benchmark.csv`)**: Ghi nhận từ các lần chạy thật qua C++ CVM Core (`algorithm="CVM-A1"`). Kèm file metadata sidecar `results/real/raw_benchmark.metadata.json` (`data_source="real"`).
-- **Dữ liệu mô phỏng nhanh (`results/synthetic/dry_run.csv`)**: Ghi nhận từ chế độ kiểm thử schema (`algorithm="CVM-A1-dryrun"`). Kèm file metadata sidecar `results/synthetic/dry_run.metadata.json` (`data_source="synthetic_mock"`). Validator của TV4 sẽ từ chối dữ liệu mô phỏng này khi phân tích kết quả nghiên cứu.
-
-### 2. Chạy một cấu hình đơn lẻ
+### 1. Chạy một cấu hình đơn lẻ
 ```bash
-python3 runner.py --m 10000 --n 5000 --f0 3000 --eps 0.05 --delta 0.01 --workload uniform
-```
-*(Mặc định ghi vào `results/real/raw_benchmark.csv`)*
-
-### 3. Chạy hàng loạt thử nghiệm (Multi-trial batch)
-```bash
-python3 runner.py --m 10000 --n 5000 --f0 3000 --trials 5 --workload zipf
+python3 runner.py --m 10000 --n 5000 --f0 3000 --eps 0.05 --delta 0.01 --workload uniform --out results/raw_benchmark.csv
 ```
 
-### 4. Chạy chế độ kiểm thử schema nhanh (Dry-run)
+### 2. Chạy hàng loạt thử nghiệm (Multi-trial batch)
 ```bash
-python3 runner.py --dry-run
+python3 runner.py --m 10000 --n 5000 --f0 3000 --trials 5 --workload zipf --out results/raw_benchmark.csv
 ```
-*(Mặc định ghi vào `results/synthetic/dry_run.csv` và `results/synthetic/dry_run.metadata.json`)*
+
+### 3. Chạy chế độ kiểm thử schema nhanh (Dry-run)
+```bash
+python3 runner.py --dry-run --out results/schema_check.csv
+```
 
 ## Cấu trúc dữ liệu RAW CSV (24 Cột Chuẩn P0)
 Dữ liệu benchmark được ghi nhận với đầy đủ 24 trường:
 `run_id,algorithm,workload,trial,m,n,F0,epsilon,delta,s,seed_generator,seed_algorithm,status,estimate,algorithm_runtime_ms,end_to_end_runtime_ms,peak_sample_size,halving_count,process_peak_memory_bytes,signed_rel_error,abs_rel_error,env_os,compiler,build_flags`.
 
-- `algorithm_runtime_ms`: Do C++ tự đo bằng `std::chrono` bao quanh vòng lặp thuật toán.
+- `algorithm_runtime_ms`: C++ cộng thời gian khởi tạo A1, xử lý từng ID đã parse và lấy kết quả.
 - `end_to_end_runtime_ms`: Do Python đo wall-clock toàn bộ chu trình khởi tạo và truyền pipe.
 - `peak_sample_size`: Số phần tử lớn nhất trong bộ nhớ đệm tập mẫu ($|X| \le s$).
-- `process_peak_memory_bytes`: Peak Resident Set Size (RSS) của riêng từng tiến trình con (per-PID):
-  - Trên Linux/macOS: Thu thập qua `os.wait4` của từng child process riêng biệt (khắc phục hoàn toàn lỗi cộng dồn tích lũy của `RUSAGE_CHILDREN`).
-  - Trên Windows: Thu thập qua Win32 API `GetProcessMemoryInfo` (`PeakWorkingSetSize`) qua ctypes.
-  - Tuyệt đối không nhầm lẫn hay thay thế `process_peak_memory_bytes` bằng `peak_sample_size`.
+- `process_peak_memory_bytes`: Peak Resident Set Size (RSS) của tiến trình C++ đo qua OS API.
 - `signed_rel_error` & `abs_rel_error`: Sai số tương đối có dấu và trị tuyệt đối; để rỗng khi thất bại hoặc $F_0=0$.
 
 ## Tự đánh giá hạn chế của phép đo (Measurement Limitations)

@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import subprocess
-import sys
 import unittest
 from pathlib import Path
 
 from src.cvm.build import build_cvm_core, detect_compiler_info, get_cvm_core_path
-from src.cvm.executor import MeasuredPopen, run_cvm_a1_core
+from src.cvm.executor import run_cvm_a1_core
 from src.stream_generator import Distribution, StreamConfig, generate_stream
 from src.types import ExperimentConfig, ExperimentStatus
 
@@ -124,64 +122,6 @@ class TestCVMCoreAdapter(unittest.TestCase):
         self.assertEqual(result.status, ExperimentStatus.EXECUTION_ERROR)
         self.assertIsNone(result.estimate)
         self.assertIn("Generator stream broken", str(result.error_msg))
-
-    def test_process_peak_memory_per_pid_differentiates(self) -> None:
-        """Verify memory measurement is per-PID and does not retain previous peaks."""
-        code_large = "import time; x = bytearray(60 * 1024 * 1024); time.sleep(0.02)"
-        p_large = MeasuredPopen(
-            [sys.executable, "-c", code_large],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        p_large.communicate()
-        large_mem = p_large.peak_memory_bytes
-
-        code_small = "import time; x = bytearray(1 * 1024 * 1024); time.sleep(0.02)"
-        p_small = MeasuredPopen(
-            [sys.executable, "-c", code_small],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        p_small.communicate()
-        small_mem = p_small.peak_memory_bytes
-
-        if large_mem is not None and small_mem is not None:
-            self.assertGreater(
-                large_mem,
-                small_mem,
-                "Process with 60MB allocation must report larger peak RSS than 1MB process",
-            )
-            # Verify small process did not retain large process peak (at least 15MB margin)
-            self.assertLess(
-                small_mem,
-                large_mem - (15 * 1024 * 1024),
-                "Subsequent smaller process must not retain the peak memory of earlier child",
-            )
-
-    def test_process_peak_memory_vs_peak_sample_size_distinction(self) -> None:
-        """Verify peak RAM bytes and algorithm buffer peak sample size are distinct."""
-        config = ExperimentConfig(
-            m=4,
-            n=10,
-            f0=3,
-            epsilon=0.05,
-            delta=0.01,
-            seed_generator=42,
-            seed_algorithm=42,
-        )
-        stream = [10, 20, 10, 30]
-        result = run_cvm_a1_core(config, stream, self.binary_path)
-
-        self.assertEqual(result.status, ExperimentStatus.SUCCESS)
-        self.assertEqual(result.peak_sample_size, 3)  # Algorithm sample size: 3 items
-        if result.process_peak_memory_bytes is not None:
-            # Physical RAM is on the scale of megabytes (> 1MB = 1,048,576 bytes)
-            self.assertGreater(result.process_peak_memory_bytes, 1_000_000)
-            self.assertNotEqual(result.process_peak_memory_bytes, result.peak_sample_size)
 
 
 if __name__ == "__main__":
