@@ -73,7 +73,13 @@ def main() -> None:
     assert process.returncode == 0 and process.stderr == "", process
     (csv_row,) = list(csv.reader(io.StringIO(process.stdout)))
     status, estimate, runtime, peak, halvings, threshold = csv_row
-    assert (status, estimate, peak, halvings, threshold) == ("algorithm_abort", "", "166", "1", "166")
+    assert (status, estimate, peak, halvings, threshold) == (
+        "algorithm_abort",
+        "",
+        "166",
+        "1",
+        "166",
+    )
     assert math.isfinite(float(runtime)) and float(runtime) >= 0, csv_row
 
     with TemporaryDirectory() as tmp:
