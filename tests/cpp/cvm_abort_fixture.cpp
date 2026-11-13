@@ -17,10 +17,16 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     for (std::size_t i = 0; i < args.size(); ++i) {
-        if (args[i] != argv[i + 1]) {
+        if (args[i] != argv[i + 1] &&
+            !(i == args.size() - 1 && std::string_view(argv[i + 1]) == "threshold-v1")) {
             std::cerr << "abort fixture: unexpected argument " << argv[i + 1] << '\n';
             return 1;
         }
+    }
+    if (std::string_view(argv[10]) == "threshold-v1") {
+        const cvm::A1 estimator(256, 0.9, 0.9, 42);
+        std::cout << "threshold-v1," << estimator.threshold() << '\n';
+        return 0;
     }
 
     // Buffer fixture input before timing A1. The injected decisions keep every

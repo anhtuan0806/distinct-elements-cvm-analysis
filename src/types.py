@@ -38,8 +38,8 @@ class ExperimentStatus(str, Enum):
 def compute_cvm_threshold(m: int, epsilon: float, delta: float) -> int:
     """Compute theoretical buffer threshold s = ceil((12 / eps^2) * log2(8m / delta)).
 
-    Matches exactly the formula in Chakraborty, Vinodchandran, Meel (2022)
-    and the C++ implementation in cvm/a1.cpp.
+    Uses Python float arithmetic for the reference. The C++ implementation's
+    effective threshold can differ because it uses long double before ceil.
     """
     if m <= 0 or not (0.0 < epsilon < 1.0) or not (0.0 < delta < 1.0):
         return 0
@@ -60,7 +60,7 @@ class ExperimentConfig:
         delta: Failure probability bound (0 < delta < 1).
         seed_generator: Random seed for deterministic stream generation.
         seed_algorithm: Random seed for CVM algorithm sampling decisions.
-        s: Buffer capacity threshold (computed if None).
+        s: Python reference threshold by default (Core reports its effective value).
         workload: Workload distribution name
             (e.g. uniform, skewed, zipf, all_distinct, all_duplicate).
         trial: Trial iteration index (1-based integer).

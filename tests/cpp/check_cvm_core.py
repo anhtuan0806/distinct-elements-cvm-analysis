@@ -46,6 +46,47 @@ def run_checks(executable: Path) -> dict:
     expected_s = math.ceil(12 / 0.05**2 * math.log2(8 * 4 / 0.01))
     assert float(row[1]) == 3 and row[3:] == ["3", "0", str(expected_s)], row
     assert invoke("legacy_compatibility", base, data) == ["3", "FALSE", "3", "0"]
+    for m, eps, delta in [
+        (8, "0.3", "0.125"),
+        (4096, "0.3", "0.125"),
+        (8, str(2**-26), "0.125"),
+        (8, "0.5", "0.49999999999999994"),
+        *((m, "0.5", "0.05") for m in (256, 1024, 4096, 16384, 65536)),
+    ]:
+        args = [str(executable), "--m", str(m), "--eps", eps, "--delta", delta, "--seed", "42"]
+        query = invoke(
+            f"threshold_{m}_{eps}_{delta}", [*args, "--output-format", "threshold-v1"], ""
+        )
+        measured = invoke(
+            f"stream_{m}_{eps}_{delta}", [*args, "--output-format", "csv-v2"], "0\n" * m
+        )
+        validate_v2(measured)
+        assert query == ["threshold-v1", measured[-1]], (query, measured)
+    threshold_command = [*base, "--output-format", "threshold-v1"]
+    invoke(
+        "threshold_malformed_m",
+        [*threshold_command[:2], "8x", *threshold_command[3:]],
+        "",
+        "invalid --m",
+    )
+    invoke(
+        "threshold_invalid_epsilon",
+        [*threshold_command[:4], "nan", *threshold_command[5:]],
+        "",
+        "epsilon",
+    )
+    invoke(
+        "threshold_invalid_delta",
+        [*threshold_command[:6], "1", *threshold_command[7:]],
+        "",
+        "delta",
+    )
+    invoke(
+        "threshold_overflow",
+        [*threshold_command[:4], "1e-30", *threshold_command[5:]],
+        "",
+        "does not fit in size_t",
+    )
     invoke("early_eof", v2, "10\n20\n10\n", "input ended after 3 IDs; expected 4")
     invoke("missing_seed", [*base[:-2], "--output-format", "csv-v2"], "", "--seed")
     invoke("negative_m", [str(executable), "--m", "-1", *v2[3:]], "", "invalid --m")

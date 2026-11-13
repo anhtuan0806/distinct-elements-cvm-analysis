@@ -11,7 +11,7 @@
 
 namespace cvm {
 
-enum class OutputFormat { legacy_csv, csv_v2 };
+enum class OutputFormat { legacy_csv, csv_v2, threshold_v1 };
 
 inline void write_a1_csv(std::ostream& output, const A1& estimator, const A1Result& result,
                          double algorithm_runtime_ms, OutputFormat format) {
