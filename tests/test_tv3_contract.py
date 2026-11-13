@@ -4,6 +4,7 @@ import csv
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from dataclasses import replace
@@ -11,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from runner import main
+from runner import main, run_single_trial
 from src.benchmark_report import HEADER, BenchmarkReport
 from src.cvm.build import build_cvm_core
 from src.cvm.executor import run_cvm_a1_core
@@ -138,6 +139,12 @@ def test_managed_output_rejects_metadata_mismatch_and_duplicate(tmp_path):
     sidecar = output.with_suffix(".metadata.json")
     raw = output.read_bytes()
     original = sidecar.read_bytes()
+    damaged = raw.replace(b"60691", b"60690")
+    assert damaged != raw and len(damaged) == len(raw)
+    output.write_bytes(damaged)
+    assert main(args) == 1
+    assert (output.read_bytes(), sidecar.read_bytes()) == (damaged, original)
+    output.write_bytes(raw)
     sidecar.write_bytes(original.replace(b'"records_count": 1', b'"records_count": 5'))
     mismatch = sidecar.read_bytes()
     assert main(args) == 1
@@ -164,6 +171,141 @@ def test_legacy_output_is_preserved(tmp_path):
     snapshot = output.read_bytes(), sidecar.read_bytes()
     assert main(_args(output)) == 1
     assert (output.read_bytes(), sidecar.read_bytes()) == snapshot
+
+
+@pytest.mark.parametrize("field", ["binary", "generator", "python", "missing", "config", "flags"])
+def test_resume_rejects_inconsistent_batch_provenance(tmp_path, field, caplog):
+    output = tmp_path / "contradiction.csv"
+    assert main(_args(output)) == 0
+    sidecar = output.with_suffix(".metadata.json")
+    metadata = json.loads(sidecar.read_bytes())
+    [batch] = metadata["batches"]
+    if field == "binary":
+        batch["environment"]["binary_sha256"] = "0" * 64
+    elif field == "generator":
+        batch["generator_sha256"] = "0" * 64
+    elif field == "python":
+        batch["environment"]["python"] = "0.0.0"
+    elif field == "missing":
+        del batch["environment"]
+    elif field == "flags":
+        batch["environment"]["build_flags"] = "other-flags"
+    else:
+        batch["configuration"]["epsilon"] = 0.3
+    sidecar.write_text(json.dumps(metadata), encoding="utf-8")
+    snapshot = (output.read_bytes(), sidecar.read_bytes())
+    assert main(_args(output)) == 1
+    assert "metadata" in caplog.text
+    assert (output.read_bytes(), sidecar.read_bytes()) == snapshot
+
+
+def test_pending_batch_mismatch_preserves_partial_record(tmp_path, monkeypatch):
+    output = tmp_path / "pending.csv"
+    original_write = BenchmarkReport._write_bytes
+
+    def interrupted_write(report, data):
+        if data == HEADER:
+            return original_write(report, data)
+        original_write(report, data[: len(data) // 2])
+        raise OSError("interrupted during CSV append")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(BenchmarkReport, "_write_bytes", interrupted_write)
+        assert main(_args(output)) == 1
+    sidecar = output.with_suffix(".metadata.json")
+    metadata = json.loads(sidecar.read_bytes())
+    metadata["pending"]["batch"]["environment"]["binary_sha256"] = "0" * 64
+    sidecar.write_text(json.dumps(metadata), encoding="utf-8")
+    snapshot = output.read_bytes(), sidecar.read_bytes()
+    assert main(_args(output)) == 1
+    assert (output.read_bytes(), sidecar.read_bytes()) == snapshot
+
+
+def test_resume_core_fingerprint_and_receipt(tmp_path, monkeypatch):
+    original = build_cvm_core()
+    binary = tmp_path / original.name
+    shutil.copyfile(original, binary)
+    receipt = binary.with_suffix(".build.json")
+    shutil.copyfile(original.with_suffix(".build.json"), receipt)
+    monkeypatch.setattr("runner.resolve_core_binary", lambda: binary)
+    output = tmp_path / "binary.csv"
+    args = _args(output)
+    assert main(args) == 0
+    sidecar = output.with_suffix(".metadata.json")
+    snapshot = output.read_bytes(), sidecar.read_bytes()
+    info = json.loads(receipt.read_bytes())
+    info["build_flags"] = "different receipt claim"
+    receipt.write_text(json.dumps(info), encoding="utf-8")
+    assert main(args) == 0
+    assert (output.read_bytes(), sidecar.read_bytes()) == snapshot
+
+    # Appended fixture bytes change the executable hash without changing its path.
+    with binary.open("ab") as executable:
+        executable.write(b"distinct binary identity fixture")
+    assert main(args) == 1
+    assert (output.read_bytes(), sidecar.read_bytes()) == snapshot
+    info["binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
+    receipt.write_text(json.dumps(info), encoding="utf-8")
+    assert main(args) == 0
+    assert len(rows(output)) == 2
+    batches = json.loads(sidecar.read_bytes())["batches"]
+    assert batches[0]["version"][0] != batches[1]["version"][0]
+
+
+def test_trial_uses_verified_binary_snapshot_even_if_original_is_replaced(tmp_path, monkeypatch):
+    original = tmp_path / "core"
+    original.write_bytes(b"verified executable")
+    sha = hashlib.sha256(original.read_bytes()).hexdigest()
+    config = ExperimentConfig(8, 1, 1, 0.3, 0.125, 42, 42, workload="all_duplicate")
+    recorded = []
+
+    class Writer:
+        def write_record(self, config, result):
+            recorded.append(result)
+
+    def run(config, stream, binary):
+        assert binary.read_bytes() == b"verified executable"
+        original.write_bytes(b"replacement between query and execution")
+        try:
+            assert binary.read_bytes() == b"verified executable"
+        finally:
+            original.write_bytes(b"verified executable")
+        return CVMResult(ExperimentStatus.SUCCESS, estimate=1, effective_s=1201)
+
+    monkeypatch.setattr("runner.run_cvm_a1_core", run)
+    result = run_single_trial(config, Writer(), "gcc", "-O3", binary=original, binary_sha256=sha)
+    assert recorded == [result]
+
+
+def test_resume_distinguishes_generator_and_input(tmp_path, monkeypatch):
+    core = build_cvm_core()
+    root = Path(__file__).resolve().parents[1]
+    local = tmp_path / "source"
+    generator = local / "src/stream_generator.py"
+    generator.parent.mkdir(parents=True)
+    shutil.copyfile(root / "src/stream_generator.py", generator)
+    shutil.copyfile(root / "runner.py", local / "runner.py")
+    monkeypatch.setattr("runner.PROJECT_ROOT", local)
+    monkeypatch.setattr("runner.resolve_core_binary", lambda: core)
+    output = tmp_path / "inputs.csv"
+    args = _args(output)
+    assert main(args) == 0
+    generator.write_bytes(generator.read_bytes() + b"\n# distinct generator identity fixture\n")
+    assert main(args) == 0
+    sidecar = output.with_suffix(".metadata.json")
+    batches = json.loads(sidecar.read_bytes())["batches"]
+    assert batches[0]["version"][1] != batches[1]["version"][1]
+    for option in (
+        ["--eps", "0.3"],
+        ["--delta", "0.125"],
+        ["--workload", "uniform"],
+        ["--seed-gen", "43"],
+        ["--seed-algo", "44"],
+        ["--trial", "2"],
+    ):
+        count = len(rows(output))
+        assert main([*args, *option]) == 0
+        assert len(rows(output)) == count + 1
 
 
 def test_concurrent_runner_processes_commit_each_trial_once(tmp_path):

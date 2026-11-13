@@ -11,7 +11,55 @@ from pathlib import Path
 
 from src.cvm.build import build_cvm_core, get_cvm_core_path
 from src.cvm.process_memory import peak_memory
-from src.types import CVMResult, ExperimentConfig, ExperimentStatus
+from src.types import CVMResult, ExperimentConfig, ExperimentStatus, compute_cvm_threshold
+
+MAX_WIRE_THRESHOLD = (1 << 64) - 1
+
+
+def _parse_threshold(text: str) -> int:
+    if not text.isascii() or not text.isdecimal() or len(text) > 20:
+        raise ValueError(f"Invalid csv-v2 threshold: expected a uint64 decimal, got {text!r}")
+    threshold = int(text)
+    if not 1 <= threshold <= MAX_WIRE_THRESHOLD:
+        raise ValueError(f"Invalid csv-v2 threshold: s={threshold} is outside [1, 2^64 - 1]")
+    return threshold
+
+
+def _core_command(binary: Path, config: ExperimentConfig, output_format: str) -> list[str]:
+    return [
+        str(binary),
+        "--m",
+        str(config.m),
+        "--eps",
+        str(config.epsilon),
+        "--delta",
+        str(config.delta),
+        "--seed",
+        str(config.seed_algorithm),
+        "--output-format",
+        output_format,
+    ]
+
+
+def query_core_threshold(binary: Path, config: ExperimentConfig) -> int:
+    result = subprocess.run(
+        _core_command(binary, config, "threshold-v1"),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=15,
+    )
+    if result.returncode != 0:
+        raise ValueError(
+            f"Core threshold-v1 query failed (exit {result.returncode}); "
+            f"check the input or rebuild an older Core: {result.stderr.strip()}"
+        )
+    prefix, _, value = result.stdout.removesuffix("\n").removesuffix("\r").partition(",")
+    if prefix != "threshold-v1":
+        raise ValueError("Invalid threshold-v1 Core response")
+    return _parse_threshold(value)
 
 
 def resolve_core_binary() -> Path:
@@ -29,20 +77,11 @@ def run_cvm_a1_core(
     effective_s = None
     try:
         binary = Path(binary_path) if binary_path is not None else resolve_core_binary()
+        expected_s = query_core_threshold(binary, config)
+        # Keep the independent query outside the measured trial.
+        start = time.perf_counter()
         input_data = "".join(f"{item}\n" for item in stream)
-        cmd = [
-            str(binary),
-            "--m",
-            str(config.m),
-            "--eps",
-            str(config.epsilon),
-            "--delta",
-            str(config.delta),
-            "--seed",
-            str(config.seed_algorithm),
-            "--output-format",
-            "csv-v2",
-        ]
+        cmd = _core_command(binary, config, "csv-v2")
         with subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
@@ -64,24 +103,32 @@ def run_cvm_a1_core(
         if proc.returncode != 0:
             raise ValueError(f"Core exit {proc.returncode}: {stderr.strip() or 'empty stderr'}")
 
-        fields = stdout.strip().split(",")
-        if len(fields) != 6 or "\n" in stdout.strip():
-            raise ValueError(f"Invalid csv-v2 output: {stdout.strip()!r}")
+        record = stdout.removesuffix("\n").removesuffix("\r")
+        fields = record.split(",")
+        if len(fields) != 6 or "\n" in record or "\r" in record:
+            raise ValueError(f"Invalid csv-v2 output: {record!r}")
         status, estimate_text, runtime_text, peak_text, halving_text, threshold_text = fields
         if status not in ("success", "algorithm_abort"):
             raise ValueError(f"Unknown Core status: {status!r}")
 
-        threshold = int(threshold_text)
+        threshold = _parse_threshold(threshold_text)
         runtime = float(runtime_text)
         peak = int(peak_text)
         halvings = int(halving_text)
-        if threshold <= 0 or not math.isfinite(runtime) or runtime < 0:
-            raise ValueError("Core returned invalid threshold or algorithm runtime")
+        if not math.isfinite(runtime) or runtime < 0:
+            raise ValueError("Core returned invalid algorithm runtime")
         effective_s = threshold
         if not 0 <= peak <= min(threshold, config.m) or not 0 <= halvings <= config.m:
             raise ValueError("Core returned invalid peak sample size or halving count")
-        if effective_s != config.s:
-            raise ValueError(f"Configured s={config.s} differs from Core s={effective_s}")
+        if threshold != expected_s:
+            effective_s = None
+            raise ValueError(f"Core s={threshold} differs from its threshold-v1 s={expected_s}")
+        if config.s != threshold:
+            reference = compute_cvm_threshold(config.m, config.epsilon, config.delta)
+            if config.s != reference:
+                raise ValueError(f"Configured s={config.s} differs from Core s={threshold}")
+        if (halvings > 0) != (peak == threshold):
+            raise ValueError("Core returned inconsistent peak sample size and halving count")
 
         if status == "algorithm_abort":
             if estimate_text or peak != threshold or halvings < 1:

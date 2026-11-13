@@ -12,6 +12,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from src.benchmark_report import BenchmarkReport, resolve_output
 from src.cli import args_to_config, parse_args
@@ -107,10 +108,26 @@ def run_single_trial(
             config.seed_generator,
         )
     )
-    result = run_cvm_a1_core(config, stream, binary)
     if binary is not None and binary_sha256 is not None:
+        executable = binary.read_bytes()
+        if hashlib.sha256(executable).hexdigest() != binary_sha256:
+            raise ValueError("Core binary changed during the batch; trial was not recorded")
+        # Use one private copy for the query and measured invocation, even if a
+        # concurrent build replaces and later restores the original pathname.
+        with TemporaryDirectory(prefix="cvm-trial-") as directory:
+            snapshot = Path(directory) / binary.name
+            snapshot.write_bytes(executable)
+            snapshot.chmod(0o500)
+            try:
+                result = run_cvm_a1_core(config, stream, snapshot)
+                if hashlib.sha256(snapshot.read_bytes()).hexdigest() != binary_sha256:
+                    raise ValueError("Core trial snapshot changed; trial was not recorded")
+            finally:
+                snapshot.chmod(0o700)
         if hashlib.sha256(binary.read_bytes()).hexdigest() != binary_sha256:
             raise ValueError("Core binary changed during the batch; trial was not recorded")
+    else:
+        result = run_cvm_a1_core(config, stream, binary)
     writer.write_record(config, result)
 
     if result.error_msg:
@@ -153,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
         info = (
             {"binary_sha256": None, "compiler": "synthetic", "build_flags": "none"}
             if binary is None
-            else binary_identity(binary)
+            else binary_identity(binary, require_receipt=True)
         )
         if args.dry_run:
             base = dataclasses.replace(

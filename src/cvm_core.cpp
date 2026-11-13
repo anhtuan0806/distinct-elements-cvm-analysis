@@ -67,10 +67,14 @@ Options parse_options(int argc, char* argv[]) {
             if (options.output_format.has_value()) {
                 throw std::invalid_argument("duplicate argument --output-format");
             }
-            if (value != "csv-v2") {
-                throw std::invalid_argument("--output-format must be csv-v2 (omit for legacy CSV)");
+            if (value == "threshold-v1") {
+                options.output_format = cvm::OutputFormat::threshold_v1;
+            } else if (value == "csv-v2") {
+                options.output_format = cvm::OutputFormat::csv_v2;
+            } else {
+                throw std::invalid_argument(
+                    "--output-format must be csv-v2 or threshold-v1 (omit for legacy CSV)");
             }
-            options.output_format = cvm::OutputFormat::csv_v2;
         }
     }
     if (!options.m.has_value()) {
@@ -107,6 +111,13 @@ int main(int argc, char* argv[]) {
         const auto init_start = Clock::now();
         cvm::A1 estimator(*options.m, *options.epsilon, *options.delta, *options.seed);
         auto algorithm_duration = Clock::now() - init_start;
+        if (options.output_format == cvm::OutputFormat::threshold_v1) {
+            std::cout << "threshold-v1," << estimator.threshold() << '\n';
+            if (!std::cout) {
+                throw std::runtime_error("failed to write threshold to stdout");
+            }
+            return 0;
+        }
         std::string line;
         while (estimator.processed() < *options.m && !estimator.aborted()) {
             if (!std::getline(std::cin, line)) {

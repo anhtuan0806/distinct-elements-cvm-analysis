@@ -10,6 +10,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from runner import main as run_benchmark
+from src.cvm.build import binary_identity
 
 
 def run_and_read(binary: Path, output: Path, m: int, epsilon: str, delta: str) -> dict[str, str]:
@@ -31,7 +32,13 @@ def run_and_read(binary: Path, output: Path, m: int, epsilon: str, delta: str) -
         "--out",
         str(output),
     ]
-    with patch("src.cvm.executor.get_cvm_core_path", return_value=binary):
+    # The standalone test compiles its fixtures outside the managed build path.
+    info = binary_identity(binary)
+    info.update(compiler="standalone C++ test", build_flags="fixture build")
+    with (
+        patch("src.cvm.executor.get_cvm_core_path", return_value=binary),
+        patch("runner.binary_identity", return_value=info),
+    ):
         assert run_benchmark(args) == 0
     with output.open(encoding="utf-8", newline="") as file:
         reader = csv.DictReader(file)
