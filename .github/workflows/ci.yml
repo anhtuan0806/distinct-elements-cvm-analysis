@@ -37,6 +37,17 @@ jobs:
         run: |
           pytest
 
+      - name: Verify C++ unit and CLI contracts
+        if: matrix.python-version == '3.12'
+        run: |
+          mkdir -p build/a1
+          python -c 'from src.cvm.build import build_cvm_core; build_cvm_core(force=True)'
+          g++ -std=c++17 -Wall -Wextra -Werror -pedantic -Isrc src/cvm/a1.cpp tests/cpp/test_a1.cpp -o build/a1/test_a1
+          build/a1/test_a1
+          g++ -std=c++17 -Isrc src/cvm/a1.cpp tests/cpp/cvm_abort_fixture.cpp -o build/a1/cvm_abort_fixture
+          python -m tests.cpp.check_cvm_core build/a1/cvm_core
+          python -m tests.cpp.check_tv1_runner build/a1/cvm_core build/a1/cvm_abort_fixture
+
   commitlint:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

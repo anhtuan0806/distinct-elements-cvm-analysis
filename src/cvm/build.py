@@ -52,15 +52,28 @@ def detect_compiler_info() -> tuple[str, str]:
     return _version(exe, msvc), ";".join(flags)
 
 
-def binary_identity(binary: Path) -> dict[str, str | bool]:
+def binary_identity(binary: Path, *, require_receipt: bool = False) -> dict[str, str | bool]:
     """Read build information only when the receipt identifies these exact bytes."""
     sha = hashlib.sha256(binary.read_bytes()).hexdigest()
     try:
         receipt = json.loads(binary.with_suffix(".build.json").read_text(encoding="utf-8"))
-        if receipt["binary_sha256"] == sha:
-            return receipt
+        if receipt["binary_sha256"] == sha and all(
+            isinstance(receipt.get(key), str)
+            and receipt[key].strip()
+            and receipt[key] not in ("unknown", "none")
+            for key in ("compiler", "build_flags")
+        ):
+            # Expose receipt fields only. Batch provenance owns OS, CPU and Python.
+            return {
+                "binary_sha256": sha,
+                "compiler": receipt["compiler"],
+                "build_flags": receipt["build_flags"],
+                "peak_rss_hook": receipt.get("peak_rss_hook") is True,
+            }
     except (OSError, ValueError, KeyError, TypeError):
         pass
+    if require_receipt:
+        raise ValueError(f"Invalid Core build receipt for {binary}; rebuild the Core")
     return {"binary_sha256": sha, "compiler": "unknown", "build_flags": "unknown"}
 
 
