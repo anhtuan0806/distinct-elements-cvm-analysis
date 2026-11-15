@@ -6,7 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import mean, median, stdev
 
-from scripts.validate_results import ENVIRONMENT, IDENTITY, verified_rows
+from scripts.validate_results import COMPLETED, ENVIRONMENT, IDENTITY, verified_rows
 
 GROUP_FIELDS = (
     "algorithm",
@@ -40,8 +40,21 @@ def metric_stats(result, label, rows, field, *, spread=False):
 
 def summarize(rows):
     groups = defaultdict(list)
+    known_thresholds = defaultdict(set)
+    s_index = GROUP_FIELDS.index("s")
     for row in rows:
-        groups[tuple(row[key] for key in GROUP_FIELDS)].append(row)
+        key = tuple(row[field] for field in GROUP_FIELDS)
+        groups[key].append(row)
+        if row["s"] is not None and row["status"] in COMPLETED:
+            known_thresholds[key[:s_index] + key[s_index + 1 :]].add(key)
+    # Attribute unmeasured attempts only when the same configuration and
+    # environment identify a single completed threshold. RAW stays untouched.
+    for key in list(groups):
+        if key[s_index] is None:
+            candidates = known_thresholds.get(key[:s_index] + key[s_index + 1 :], ())
+            if len(candidates) == 1:
+                groups[next(iter(candidates))].extend(groups.pop(key))
+
     summary = []
     for key, records in groups.items():
         group = dict(zip(GROUP_FIELDS, key, strict=True))
