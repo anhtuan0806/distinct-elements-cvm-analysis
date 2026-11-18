@@ -27,9 +27,22 @@ trong checkout này có dữ liệu lịch sử, vì vậy hãy dùng một tên
 
 ## RAW và sidecar
 
-- `s` lấy từ cột thứ sáu của C++ `csv-v2`. Nếu ngưỡng Python và C++ khác nhau,
-  trial có status `execution_error`, ghi ngưỡng thực đã xác định và log cả hai
-  giá trị. Khi Core chưa báo ngưỡng, cột `s` của lần lỗi để trống.
+- Trước mỗi trial cần thực thi, Runner gọi cùng executable và tham số với
+  `--output-format threshold-v1`. Core khởi tạo A1 và trả một dòng
+  `threshold-v1,<s>` trước khi đọc stdin. Truy vấn nằm ngoài thời gian đo
+  trial. Runner kiểm `csv-v2` có đúng một dòng và sáu trường, kiểm status,
+  estimate, giới hạn sample/halving và đối chiếu chính xác `s` với kết quả
+  truy vấn. Hai giao thức yêu cầu ngưỡng nguyên dương trong miền uint64.
+  Nếu `s` từ lượt chạy khác kết quả truy vấn, trial là `execution_error`
+  và cột `s` để trống. RAW của trial hợp lệ ghi `s` từ `csv-v2`.
+- Python lưu `configuration.s` làm tham chiếu. Caller Python truyền ngưỡng
+  khác tham chiếu phải khớp giá trị Core. Hai chế độ C++ dùng cùng constructor
+  và cho phép các toolchain có độ chính xác `long double` khác nhau. Kiểm tra
+  này xác nhận hai phản hồi nhất quán với nhau. Lỗi chung trong công thức C++
+  cần kiểm thử Core hoặc đối chứng độc lập.
+- Với lượt chạy thật, resume nhận diện trial bằng phiên bản binary/generator/Python,
+  cấu hình đầu vào và hai seed. `s` trong RAW là kết quả của Core nên nằm ngoài
+  khóa resume. Sidecar vẫn giữ `configuration.s` làm giá trị tham chiếu.
 - `estimate`, signed RE và ARE để trống khi status khác success.
 - `algorithm_runtime_ms` là thời gian từ C++ tính bằng ms.
   `end_to_end_runtime_ms` đo thêm chuẩn bị input và thực thi tiến trình.
@@ -44,12 +57,23 @@ trong checkout này có dữ liệu lịch sử, vì vậy hãy dùng một tên
   từng batch. Khoảng dòng đếm từ 1 và bỏ header. Mỗi batch có UUID, thời gian,
   cấu hình/seed, commit gốc, hash các file nguồn đang chạy, hash binary và
   thông tin OS, Python, CPU, compiler/build flags khi xác định được.
-  Với binary ngoài auto-build, compiler và cờ build để `unknown` nếu thiếu receipt.
+  Lượt real yêu cầu build receipt có compiler, cờ build và SHA-256 khớp
+  executable. Với mỗi trial mới, Runner kiểm SHA-256 của byte đọc từ binary,
+  rồi dùng một bản sao tạm riêng cho cả query và lượt đo. Việc sao chép nằm
+  ngoài thời gian đo. Runner đối chiếu lại hash bản sao và binary gốc trước
+  khi ghi record để phát hiện thay đổi trong batch.
+  Receipt cung cấp định danh byte và nhãn build. Xác nhận nguồn của receipt
+  và executable là trách nhiệm của quy trình build. Cùng byte binary và cùng
+  cấu hình vẫn resume khi chỉ nhãn receipt đổi, giữ nhãn đo gốc trong RAW.
 - Runner giữ khóa file trong suốt batch. Mỗi append ghi trước bản ghi dự kiến
   trong sidecar, sau đó flush CSV và chốt sidecar bằng thay file nguyên tử.
-  Sau gián đoạn, chạy lại cùng lệnh. Runner chỉ nối tiếp phần ghi dở khi khớp
-  với byte đã lưu trong sidecar. Nếu dữ liệu lệch, Runner báo lỗi và giữ file
-  để kiểm tra. Không sửa thủ công sidecar để hợp thức hóa dữ liệu cũ.
+  Trước khi index hoặc khôi phục, Runner kiểm `batch.version` khớp SHA-256
+  binary, SHA-256 Generator và phiên bản Python trong batch. Nó đối chiếu
+  cấu hình, trial, seed và nhãn build với các dòng RAW. Metadata mâu thuẫn
+  làm lệnh thoát lỗi và giữ hai tệp để kiểm tra. Sau gián đoạn, chạy lại cùng
+  lệnh để khôi phục phần ghi dở khớp với byte đã lưu trong sidecar.
+  Trial đã hoàn tất bằng binary cũ vẫn có thể được nhận diện theo hash gốc.
+  Nếu dùng binary mới, chỉ dùng cùng tệp khi muốn ghi batch với version mới.
 
 Mã thoát `0` cho batch hợp lệ, kể cả algorithm abort và trial đã được bỏ qua.
 Mã thoát `1` khi cấu hình, dữ liệu, build hoặc một trial bị lỗi. Lỗi cú pháp CLI trả `2`. Runner ghi stderr
@@ -63,6 +87,7 @@ python -m pytest tests/test_tv3_contract.py tests/test_tv3_platform.py tests/tes
 ```
 
 Auto-build chạy compiler với đường dẫn nguồn tương đối từ project root, bao gồm
-đường dẫn Windows có dấu và dấu cách. Nếu đã có binary cũ, build lại bằng
+đường dẫn Windows có dấu và dấu cách. Binary cũ thiếu `threshold-v1` cần build lại bằng
 `python -c "from src.cvm.build import build_cvm_core; build_cvm_core(force=True)"`. Runner ghi dữ liệu thử vào thư mục tạm trong
-test. Các kết quả smoke ở đây dùng để xác nhận pipeline và đơn vị.
+test. Workflow Ubuntu chạy pytest trên Python 3.10–3.12 và chạy bộ C++
+standalone trên Python 3.12, gồm CLI và fixture abort.
