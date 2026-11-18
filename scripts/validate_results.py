@@ -33,6 +33,8 @@ class ValidationReport:
     rows: list[dict] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
+    metadata_sha256: str = ""
 
     @property
     def verified(self):
@@ -263,7 +265,8 @@ def validate(path, metadata_path=None):
     )
     legacy = False
     try:
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata_content = metadata_path.read_bytes()
+        metadata = json.loads(metadata_content.decode("utf-8"))
         if not isinstance(metadata, dict):
             raise ValueError("sidecar must be a JSON object")
         if not metadata:
@@ -349,6 +352,8 @@ def validate(path, metadata_path=None):
             completed.add(key)
     if not report.errors:
         report.classification = "verified_real"
+        report.metadata = metadata
+        report.metadata_sha256 = hashlib.sha256(metadata_content).hexdigest()
     elif not legacy:
         report.classification = "invalid"
     return report

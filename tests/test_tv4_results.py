@@ -278,3 +278,157 @@ def test_summary_grouping_and_synthetic_plot(tmp_path):
 def test_plot_omits_unmeasured_ram(tmp_path):
     assert plot_summary([], tmp_path, label="SYNTHETIC TEST DATA") == []
     assert list(Path(tmp_path).iterdir()) == []
+
+
+def test_jupyter_windows_p0_matches_summary_cli(tmp_path):
+    from scripts.analyze_results import main as analyze_cli
+    from scripts.jupyter_analysis import analyze_jupyter_results
+
+    raw = Path(__file__).resolve().parents[1] / "results/real/tv4_timespace_p0_20261113.csv"
+    sidecar = raw.with_suffix(".metadata.json")
+    result = analyze_jupyter_results(raw, tmp_path)
+    assert result.raw.shape == (135, 24)
+    assert tuple(result.raw.columns) == CSV_COLUMNS
+    assert len(result.summary) == 15
+    assert result.summary["success_count"].sum() == 135
+    assert {path.name for path in result.png_paths} == {
+        "timespace_runtime.png",
+        "timespace_ram.png",
+        "timespace_sample.png",
+    }
+    assert all(path.is_file() for path in result.png_paths)
+    assert result.provenance.classification == "verified_real"
+    assert result.provenance.raw_sha256 == hashlib.sha256(raw.read_bytes()).hexdigest()
+    assert result.provenance.metadata_sha256 == hashlib.sha256(sidecar.read_bytes()).hexdigest()
+    report = result.markdown_path.read_text(encoding="utf-8")
+    for expected in ("Windows P0", "MinGW", "44000", "84000", "135", "MiB", "Big-O"):
+        assert expected in report
+
+    cli_csv = tmp_path / "cli.csv"
+    assert analyze_cli([str(raw), "--out", str(cli_csv)]) == 0
+    assert result.summary_path.read_bytes() == cli_csv.read_bytes()
+
+
+@pytest.mark.parametrize("condition", ["missing", "invalid", "synthetic", "errors_only"])
+def test_jupyter_rejects_unusable_raw_before_export(raw_fixture, tmp_path, condition):
+    from scripts.jupyter_analysis import analyze_jupyter_results
+
+    path, config, row = raw_fixture
+    if condition == "invalid":
+        write_fixture(path, config, [{**row, "m": "bad"}])
+    elif condition == "synthetic":
+        write_fixture(path, config, [row], changes={"data_source": "synthetic_mock"})
+    elif condition == "errors_only":
+        row.update(
+            status="resource_failure", s="", estimate="", signed_rel_error="", abs_rel_error=""
+        )
+        write_fixture(path, config, [row])
+
+    expected = {
+        "missing": "RAW",
+        "invalid": "invalid",
+        "synthetic": "synthetic",
+        "errors_only": "success|algorithm_abort",
+    }
+    out = tmp_path / "exports"
+    with pytest.raises(ValueError, match=expected[condition]):
+        analyze_jupyter_results(path, out)
+    assert not out.exists()
+
+
+def test_jupyter_single_configuration_and_rss_disappears(raw_fixture, tmp_path):
+    from scripts.jupyter_analysis import analyze_jupyter_results
+
+    path, config, row = raw_fixture
+    out = tmp_path / "exports"
+    write_fixture(path, config, [row])
+    first = analyze_jupyter_results(path, out)
+    [old_ram] = (p for p in first.png_paths if p.name == "timespace_ram.png")
+    old_bytes = old_ram.read_bytes()
+    row.update(process_peak_memory_bytes="")
+    write_fixture(path, config, [row])
+    sidecar = path.with_suffix(".metadata.json").rename(tmp_path / "explicit.json")
+    second = analyze_jupyter_results(path, out, metadata_path=sidecar)
+
+    assert second.summary_path.parent != first.summary_path.parent
+    assert second.provenance.metadata_path == sidecar
+    assert {p.name for p in second.png_paths} == {"timespace_runtime.png", "timespace_sample.png"}
+    assert not list(second.summary_path.parent.glob("*ram*.png"))
+    assert old_ram.read_bytes() == old_bytes
+    assert second.summary.loc[0, "sample_median"] == 20
+    assert any("m = 100" in note and "xu hướng" in note for note in second.notes)
+    assert any("RSS" in note for note in second.notes)
+    report = second.markdown_path.read_text(encoding="utf-8")
+    assert "explicit.json" in report and "timespace_ram.png" not in report
+
+
+def test_summary_counts_failed_attempt_with_its_successful_retry(raw_fixture):
+    path, config, row = raw_fixture
+    failed = dict(
+        row, status="execution_error", estimate="", signed_rel_error="", abs_rel_error="", s=""
+    )
+    success = dict(row, run_id=str(uuid4()))
+    write_fixture(path, config, [failed, success])
+    sidecar = path.with_suffix(".metadata.json")
+    metadata = json.loads(sidecar.read_text(encoding="utf-8"))
+    [batch] = metadata["batches"]
+    batch.update(last_record=1, requested_trials=1)
+    metadata["batches"].append(
+        {**batch, "batch_id": str(uuid4()), "first_record": 2, "last_record": 2}
+    )
+    sidecar.write_text(json.dumps(metadata), encoding="utf-8")
+    validated = validate(path)
+    assert validated.verified, validated.errors
+    assert validated.rows[0]["s"] is None
+    [group] = summarize(validated.rows)
+    assert group["s"] == config.s
+    assert group["execution_error_count"] == group["success_count"] == 1
+    assert group["run_count"] == 2 and group["success_rate"] == 0.5
+
+
+def test_summary_keeps_missing_threshold_when_assignment_is_ambiguous(raw_fixture):
+    path, config, row = raw_fixture
+    write_fixture(path, config, [row])
+    [success] = validate(path).rows
+    groups = summarize(
+        [
+            success,
+            {**success, "s": config.s + 1},
+            {**success, "s": None, "status": "resource_failure"},
+        ]
+    )
+    assert len(groups) == 3
+    assert groups[0]["s"] is None
+    assert groups[0]["resource_failure_count"] == 1
+    assert all(group["success_count"] == 1 for group in groups[1:])
+
+
+def test_jupyter_report_labels_groups_measured_on_different_cpus(raw_fixture, tmp_path):
+    from scripts.jupyter_analysis import analyze_jupyter_results
+
+    path, config, row = raw_fixture
+    write_fixture(path, config, [row, {**row, "run_id": str(uuid4())}])
+    sidecar = path.with_suffix(".metadata.json")
+    metadata = json.loads(sidecar.read_text(encoding="utf-8"))
+    [batch] = metadata["batches"]
+    batch.update(last_record=1, requested_trials=1)
+    batch["environment"]["cpu"] = "CPU alpha"
+    metadata["batches"].append(
+        {
+            **batch,
+            "batch_id": str(uuid4()),
+            "first_record": 2,
+            "last_record": 2,
+            "environment": {**batch["environment"], "cpu": "CPU beta"},
+        }
+    )
+    sidecar.write_text(json.dumps(metadata), encoding="utf-8")
+    result = analyze_jupyter_results(path, tmp_path / "exports")
+    report = result.markdown_path.read_text(encoding="utf-8")
+    assert len(result.summary) == 2 and len(result.png_paths) == 6
+    assert any(line.startswith("| E1 |") and "CPU alpha" in line for line in report.splitlines())
+    assert any(line.startswith("| E2 |") and "CPU beta" in line for line in report.splitlines())
+    assert "| 1 | E1 | uniform |" in report and "| 2 | E2 | uniform |" in report
+    summary_rows = [line for line in report.splitlines() if line.startswith("| uniform |")]
+    assert len(summary_rows) == 2
+    assert "| E1 |" in summary_rows[0] and "| E2 |" in summary_rows[1]
