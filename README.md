@@ -69,6 +69,7 @@ Dữ liệu benchmark được ghi nhận với đầy đủ 24 trường:
 
 - [Cài đặt, build, chạy và kiểm thử CVM-A1](docs/README.md)
 - [Runner TV3: RAW, resume, provenance và đo RAM](docs/tv3-runner.md)
+- [Bàn giao build/core smoke cho Linux native](docs/linux-core-smoke.md) — nghiệm thu native **CHƯA CHẠY**.
 - [Kết quả kiểm thử P0 GĐ1](docs/cvm-a1-p0-evidence.md)
 - [Kiến trúc & Luồng dữ liệu (Current Flow)](README_CURRENT_FLOW.md)
 - [Bảng tiến độ công việc (Task Roadmap)](README_TASKS.md)

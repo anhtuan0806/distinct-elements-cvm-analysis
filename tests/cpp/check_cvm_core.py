@@ -46,6 +46,24 @@ def run_checks(executable: Path) -> dict:
     expected_s = math.ceil(12 / 0.05**2 * math.log2(8 * 4 / 0.01))
     assert float(row[1]) == 3 and row[3:] == ["3", "0", str(expected_s)], row
     assert invoke("legacy_compatibility", base, data) == ["3", "FALSE", "3", "0"]
+    for name, m, ids, exact_distinct in [
+        ("all_duplicate", 1024, [17] * 1024, 1),
+        ("all_distinct_below_threshold", 64, list(range(64)), 64),
+    ]:
+        command = [str(executable), "--m", str(m), *v2[3:]]
+        measured = invoke(name, command, "".join(f"{item}\n" for item in ids))
+        validate_v2(measured)
+        # These inputs never thin, so exactness is justified by p = 1.
+        assert float(measured[1]) == exact_distinct, measured
+        assert measured[3:5] == [str(exact_distinct), "0"], measured
+
+    halving_command = [str(executable), "--m", "4096", "--eps", "0.9", *v2[5:]]
+    halving = invoke(
+        "all_distinct_with_halving", halving_command, "".join(f"{i}\n" for i in range(4096))
+    )
+    validate_v2(halving)
+    assert int(halving[4]) > 0 and halving[3] == halving[5], halving
+    # No assertion that the random estimate equals the true distinct count.
     for m, eps, delta in [
         (8, "0.3", "0.125"),
         (4096, "0.3", "0.125"),

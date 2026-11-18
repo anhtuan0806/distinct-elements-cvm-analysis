@@ -37,7 +37,8 @@ if ($LASTEXITCODE -ne 0) { throw 'CVM-A1 tests failed' }
 ```
 
 File build nằm trong `build/a1/`, đã được Git bỏ qua. Đây là bộ test C++ độc lập;
-`pytest` hiện chỉ chạy test Python. Chưa tích hợp C++ vào CI.
+`pytest` chạy test Python và một số test gọi C++; workflow Ubuntu còn có bước C++
+standalone riêng. CI không thay thế nghiệm thu trên máy Linux native của nhóm.
 
 Build/test tương đương bằng GCC trên Linux hoặc shell có `g++` hỗ trợ C++17:
 
@@ -50,6 +51,9 @@ python3 tests/cpp/check_cvm_core.py build/a1/cvm_core --log build/a1/metrics-smo
 ```
 
 Đã build và kiểm thử với MSVC 19.41.34120 x64 trên Windows và GCC 14.2 trên Linux. Cả hai dùng C++17.
+Đây là ghi nhận lịch sử, không xác nhận Linux native cài trực tiếp. Task Linux core
+smoke hiện **CHƯA CHẠY trên Linux native**; dùng [quy trình bàn giao](linux-core-smoke.md)
+để lấy đúng commit, build và thu log trên máy mục tiêu thật.
 
 Khởi tạo `cvm::A1(m, epsilon, delta, seed)`, gọi `update(id)` cho từng `std::uint64_t`,
 rồi gọi `result()` sau đúng `m` lượt đọc (tính cả ID lặp), hoặc ngay khi `aborted()` là
@@ -145,9 +149,10 @@ status,estimate,algorithm_runtime_ms,peak_sample_size,halving_count,s
 | `halving_count` | Dùng `halving_count()`: số lần chia đôi p, gồm lượt dẫn tới abort. |
 | `s` | Dùng `threshold()`: `ceil((12 / epsilon²) * log2(8m / delta))` khi `m > 0`. |
 
-`s` là sức chứa kích hoạt giảm mẫu. TV3 cần đọc cột thứ sáu của stdout và dùng
-giá trị đó cho RAW CSV, hoặc xác thực nó bằng giá trị dự kiến trước khi ghi.
-Adapter hiện đọc được dòng 6 cột nhưng bỏ giá trị cột thứ sáu và ghi `s` từ Python.
+`s` là sức chứa kích hoạt giảm mẫu. Adapter hiện truy vấn `threshold-v1,<s>` từ
+cùng executable trước lượt đo, đối chiếu chính xác với cột thứ sáu của `csv-v2`,
+rồi ghi ngưỡng hiệu lực của Core vào RAW. Python giữ công thức tham chiếu; tại biên
+ceil có thể khác 1 do `long double`. Xem [contract TV3 hiện hành](tv3-runner.md).
 Quét `s` độc lập cho RQ1 là đề xuất P1 ngoài phạm vi GĐ1 hiện tại.
 
 Timer dùng `std::chrono::steady_clock`: cộng duration của ba phần rồi đổi sang ms.
@@ -227,5 +232,6 @@ giảm mẫu; không lưu toàn bộ stream. Đây không phải RSS hoặc số
 nếu mỗi ID cần log2(n) bit thì riêng phần lưu ID tương ứng O(s log n) bit.
 
 Checklist, lệnh đã chạy và kết quả thực tế được ghi tại
-[bằng chứng P0 GĐ1](cvm-a1-p0-evidence.md). TV3 cần đối soát `s` từ C++ khi ghi
-RAW. Nhóm còn cần xác nhận quy ước luồng rỗng và thống nhất CI C++.
+[bằng chứng P0 GĐ1](cvm-a1-p0-evidence.md). Quy trình và phần còn thiếu của nghiệm
+thu Linux native ở [Linux core smoke](linux-core-smoke.md). Nhóm còn cần xác nhận
+quy ước luồng rỗng; Runner hiện yêu cầu m dương dù CLI Core chấp nhận m = 0.
