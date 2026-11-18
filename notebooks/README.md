@@ -34,11 +34,11 @@ Cell cấu hình đặt `MODE = "READ_EXISTING_P0"` mặc định. Chế độ n
 - `SMOKE_LINUX`: gọi `run_jupyter_benchmark(preset="smoke")` của TV3 để chạy CVM-A1 thật khi API TV3 đã có.
 - `CUSTOM_SWEEP`: gọi API TV3 với cấu hình trong cell. Cần đặt `RUN_CUSTOM = True` để xác nhận chạy; cell mặc định chỉ kiểm tra và xem trước số lượt.
 
-Nếu API TV3 hoặc TV4 chưa có trong checkout, notebook hiện trạng thái `CHỜ API TV3` hoặc `CHỜ API TV4` và không tạo dữ liệu giả. Khi API TV4 có mặt, notebook dùng `analyze_jupyter_results(...)`; trước đó chế độ P0 hiển thị các bảng và hình đã lưu cùng nhãn cho biết API chưa được tích hợp.
+Nếu API chạy benchmark TV3 chưa có trong checkout, notebook hiện `CHỜ API TV3` và không tạo RAW. Nếu API Jupyter TV4 chưa có, notebook gọi các hàm TV4 hiện có để xác thực RAW/sidecar, tổng hợp và vẽ lại từ cùng dữ liệu. Khi API Jupyter TV4 có mặt, notebook gọi `analyze_jupyter_results(...)`.
 
 ## Kết quả và xuất tệp
 
-RAW CSV, sidecar, bảng tổng hợp và PNG được sao chép hoặc tạo trong `notebooks/exports/`. Notebook hiển thị đường dẫn và môi trường ghi trong provenance. P0 dùng nguyên hiện vật Windows đã lưu; smoke/custom ghi hiện vật riêng do API TV3 trả về.
+Mỗi lần phân tích tạo thư mục riêng dưới `notebooks/exports/`. Bảng tổng hợp và PNG được tạo lại từ RAW đã xác thực và lưu trong thư mục lượt chạy. Notebook hiển thị đường dẫn RAW, sidecar, bảng và PNG; P0 tham chiếu RAW/sidecar Windows đã lưu, còn smoke/custom dùng hiện vật riêng do API TV3 tạo.
 
 ## Trạng thái kiểm tra Linux
 
@@ -48,7 +48,8 @@ RAW CSV, sidecar, bảng tổng hợp và PNG được sao chép hoặc tạo tr
 - Môi trường: Linux x86_64, kernel `7.0.0-43-generic`; `systemd-detect-virt` trả `none`; Python `3.14.4`; GCC `15.2.0`.
 - Gói đã cài từ `requirements-jupyter.txt`: NumPy `2.5.5`, SciPy `1.18.1`, Matplotlib `3.11.2`, pandas `3.1.1`, JupyterLab `4.6.6`, ipykernel `7.4.0`.
 - Lệnh cài: `python3 -m venv /tmp/cvm-tv2-jupyter-venv`, kích hoạt môi trường, rồi `python -m pip install -r requirements-jupyter.txt`.
-- Đã thực thi toàn bộ cell bằng `nbclient` trong kernel Python. `READ_EXISTING_P0` qua validator, hiển thị 135 bản ghi, 15 nhóm và ba PNG. `SMOKE_LINUX` hiện `CHỜ API TV3`; `CUSTOM_SWEEP` chỉ xem trước cấu hình khi `RUN_CUSTOM = False`.
+- Đã thực thi toàn bộ cell bằng `nbclient` trong kernel Python. `READ_EXISTING_P0` qua validator, tổng hợp lại thành 15 nhóm và tạo ba PNG từ RAW; 135 bản ghi hiển thị trong DataFrame. Khi đặt epsilon custom ngoài miền nhưng vẫn ở chế độ P0, notebook vẫn chạy. `SMOKE_LINUX` hiện `CHỜ API TV3`; `CUSTOM_SWEEP` chỉ xem trước cấu hình khi `RUN_CUSTOM = False`.
+- Kiểm tra hàm xác nhận môi trường: hệ điều hành hiện tại được nhận diện là Ubuntu Linux; `systemd-detect-virt --vm` và `--container` đều trả `none`.
 - Hệ thống báo không phát hiện máy ảo; trạng thái máy vật lý Ubuntu dual boot và thao tác chọn kernel trong giao diện JupyterLab chưa được xác minh độc lập.
 
 **CHƯA XÁC MINH end-to-end trên Linux native theo yêu cầu nhóm.** API chạy notebook TV3 chưa có trong checkout này; smoke/custom thật chưa chạy. Sau khi ghép API TV1/TV3/TV4, cần kiểm tra trên máy Ubuntu dual boot, xác thực sidecar và lưu log gồm phiên bản Python, GCC, lệnh chạy, trạng thái validator và đường dẫn đầu ra. Không dùng kết quả P0 Windows để báo cáo số đo Linux.
