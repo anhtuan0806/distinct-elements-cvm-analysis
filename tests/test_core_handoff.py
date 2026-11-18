@@ -4,6 +4,7 @@ import argparse
 import json
 import subprocess
 import sys
+from datetime import datetime
 
 import pytest
 
@@ -79,3 +80,50 @@ def test_build_failure_is_nonzero_and_later_steps_are_not_pass(checkout, monkeyp
     assert report["steps"]["build_core"]["exit_code"] == 17
     assert report["steps"]["unit"]["status"] == "CHƯA CHẠY"
     assert (checkout.output_dir / "build_core.stderr.log").read_bytes() == b"fixture stderr"
+
+
+def run_timed_out_build(checkout, monkeypatch, stdout, stderr):
+    monkeypatch.setattr(
+        handoff, "environment", lambda: {"os": "Windows", "virtualization_indicators": []}
+    )
+    monkeypatch.setattr(build, "_compiler", lambda: ("fixture-compiler", (), True))
+
+    def timeout(command, **kwargs):
+        if "-c" in command:
+            raise subprocess.TimeoutExpired(
+                command, kwargs["timeout"], output=stdout, stderr=stderr
+            )
+        return subprocess.CompletedProcess(command, 0, b"compiler banner", b"")
+
+    monkeypatch.setattr(handoff.subprocess, "run", timeout)
+    assert handoff.verify(checkout) == 1
+    report = json.loads((checkout.output_dir / "report.json").read_text(encoding="utf-8"))
+    assert report["status"] == "FAIL"
+    step = report["steps"]["build_core"]
+    assert step["status"] == "FAIL" and step["timed_out"] is True
+    assert step["exit_code"] is None
+    assert step["timeout_seconds"] == 300
+    assert datetime.fromisoformat(step["finished_at"]).utcoffset() is not None
+    assert "build_core: timed out after 300 seconds" in report["error"]
+    assert all(
+        report["steps"][name]["status"] == "CHƯA CHẠY"
+        for name in handoff.STEPS[handoff.STEPS.index("build_core") + 1 :]
+    )
+
+
+@pytest.mark.parametrize(
+    ("stdout", "stderr"),
+    [(b"partial stdout\xff\n", b"partial stderr\xfe\n"), ("stdout dở dang\n", "stderr dở dang\n")],
+)
+def test_timeout_preserves_partial_output(checkout, monkeypatch, stdout, stderr):
+    run_timed_out_build(checkout, monkeypatch, stdout, stderr)
+    expected_stdout = stdout.encode("utf-8") if isinstance(stdout, str) else stdout
+    expected_stderr = stderr.encode("utf-8") if isinstance(stderr, str) else stderr
+    assert (checkout.output_dir / "build_core.stdout.log").read_bytes() == expected_stdout
+    assert (checkout.output_dir / "build_core.stderr.log").read_bytes() == expected_stderr
+
+
+def test_timeout_without_output_still_reports_failure(checkout, monkeypatch):
+    run_timed_out_build(checkout, monkeypatch, None, None)
+    assert (checkout.output_dir / "build_core.stdout.log").read_bytes() == b""
+    assert (checkout.output_dir / "build_core.stderr.log").read_bytes() == b""

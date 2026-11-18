@@ -136,6 +136,17 @@ def verify(args: argparse.Namespace) -> int:
                 raise RuntimeError(f"{name}: exit {result.returncode}; see {output}")
             step["status"] = "PASS"
             print(f"PASS {name} (exit 0)", flush=True)
+        except subprocess.TimeoutExpired as error:
+            step.update(
+                exit_code=None, timed_out=True, timeout_seconds=error.timeout, finished_at=now()
+            )
+            for channel, data in (("stdout", error.output), ("stderr", error.stderr)):
+                if isinstance(data, str):
+                    data = data.encode("utf-8")
+                (output / f"{name}.{channel}.log").write_bytes(data if data is not None else b"")
+            raise RuntimeError(
+                f"{name}: timed out after {error.timeout} seconds; see {output}"
+            ) from error
         except BaseException:
             step.setdefault("exit_code", None)
             step["finished_at"] = now()
