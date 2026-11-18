@@ -1,12 +1,12 @@
 # Chạy notebook phân tích time/space
 
-Notebook chính: `BIG_O_TimeSpace.ipynb`. Notebook dùng Python để đọc P0 đã lưu hoặc gọi API thực nghiệm TV3 và API phân tích TV4 khi các mô-đun đó có trong checkout.
+Notebook chính: `BIG_O_TimeSpace.ipynb`. Notebook tích hợp API chạy thực nghiệm của TV3 và API phân tích của TV4. Các phép đo mới chỉ được chạy trên Linux native Ubuntu.
 
 ## Yêu cầu
 
-- Linux native Ubuntu; không dùng WSL, máy ảo hoặc Colab để xác nhận phép đo Linux.
-- Python 3.10 trở lên theo khai báo của dự án.
-- GCC hoặc Clang hỗ trợ C++17 khi chạy benchmark thật. TV1 cung cấp lõi và bước build.
+- Ubuntu Linux native; không dùng WSL, máy ảo hoặc Colab để xác nhận phép đo Linux.
+- Python 3.10 trở lên.
+- GCC hoặc Clang có hỗ trợ C++17 để biên dịch CVM-A1.
 - Kết nối Internet khi cài các gói Python.
 
 ## Cài đặt và mở notebook
@@ -22,34 +22,33 @@ python -m ipykernel install --user --name distinct-elements-cvm --display-name "
 jupyter lab
 ```
 
-Trong JupyterLab, mở `notebooks/BIG_O_TimeSpace.ipynb` và chọn kernel **Python (CVM analysis)**. Chọn **Run → Run All Cells** để chạy theo chế độ đang đặt trong cell cấu hình.
-
-Notebook dùng `sys.executable` của kernel hiện hành và tìm thư mục gốc dựa trên `pyproject.toml`; không cần sửa đường dẫn theo máy.
+Trong JupyterLab, mở `notebooks/BIG_O_TimeSpace.ipynb`, chọn kernel **Python (CVM analysis)**, rồi chọn **Run → Run All Cells**. Notebook dùng `sys.executable` của kernel hiện hành và dò thư mục gốc qua `pyproject.toml`; không cần sửa đường dẫn theo máy.
 
 ## Chế độ chạy
 
-Cell cấu hình đặt `MODE = "READ_EXISTING_P0"` mặc định. Chế độ này đọc bộ P0 đã lưu trên Windows, kiểm tra RAW và sidecar bằng validator hiện có, sau đó hiển thị 135 bản ghi, 15 nhóm, ba hình đã lưu và thông tin môi trường Windows. Kết quả này không phải phép đo Linux.
+Cell cấu hình mặc định đặt `MODE = "READ_EXISTING_P0"`. Run All chỉ đọc bộ P0 đã lưu, xác thực RAW/sidecar qua API TV4, rồi hiển thị 135 bản ghi, 15 nhóm thống kê và ba hình được tạo từ dữ liệu đã xác thực. Sidecar P0 hiện ghi môi trường phép đo Windows; hệ điều hành của kernel được hiển thị riêng.
 
-- `READ_EXISTING_P0`: đọc bộ dữ liệu P0 có sẵn; an toàn cho **Run All**.
-- `SMOKE_LINUX`: gọi `run_jupyter_benchmark(preset="smoke")` của TV3 để chạy CVM-A1 thật khi API TV3 đã có.
-- `CUSTOM_SWEEP`: gọi API TV3 với cấu hình trong cell. Cần đặt `RUN_CUSTOM = True` để xác nhận chạy; cell mặc định chỉ kiểm tra và xem trước số lượt.
+- `READ_EXISTING_P0`: đọc và phân tích P0 đã lưu. Chế độ này không chạy benchmark.
+- `SMOKE_LINUX`: gọi `src.jupyter_adapter.run_jupyter_benchmark(preset="smoke")`, sau đó gửi RAW/sidecar cho TV4.
+- `CUSTOM_SWEEP`: xem trước số cấu hình và lượt khi `RUN_CUSTOM = False`. Đặt `RUN_CUSTOM = True` để gọi TV3 với `CUSTOM_M`, `CUSTOM_N`, `CUSTOM_F0`, `CUSTOM_EPSILON`, `CUSTOM_DELTA`, workload, seed và số trial đã cấu hình.
 
-Nếu API chạy benchmark TV3 chưa có trong checkout, notebook hiện `CHỜ API TV3` và không tạo RAW. Nếu API Jupyter TV4 chưa có, notebook gọi các hàm TV4 hiện có để xác thực RAW/sidecar, tổng hợp và vẽ lại từ cùng dữ liệu. Khi API Jupyter TV4 có mặt, notebook gọi `analyze_jupyter_results(...)`.
+TV2 kiểm tra miền giá trị cấu hình custom; TV3 kiểm tra lại các ràng buộc trước khi chạy. Với phép đo mới, notebook xác nhận Ubuntu, Linux, WSL và môi trường máy ảo/container trước khi gọi TV3. TV4 xác thực dữ liệu và sidecar; notebook dừng nếu kết quả không được phân loại `verified_real`.
 
-## Kết quả và xuất tệp
+## Kết quả và tệp xuất
 
-Mỗi lần phân tích tạo thư mục riêng dưới `notebooks/exports/`. Bảng tổng hợp và PNG được tạo lại từ RAW đã xác thực và lưu trong thư mục lượt chạy. Notebook hiển thị đường dẫn RAW, sidecar, bảng và PNG; P0 tham chiếu RAW/sidecar Windows đã lưu, còn smoke/custom dùng hiện vật riêng do API TV3 tạo.
+Mỗi lượt tạo thư mục riêng dưới `notebooks/exports/`. TV3 lưu RAW CSV và sidecar trong thư mục `real/`. TV4 tạo thư mục phân tích riêng bên dưới `analysis/`, gồm CSV tổng hợp, báo cáo Markdown và các PNG runtime, RSS, peak sample. Notebook hiển thị trạng thái các lượt, bảng RAW, bảng tổng hợp, provenance, đường dẫn và hình. Số PNG phụ thuộc dữ liệu đầu vào; bộ P0 có ba hình.
 
-## Trạng thái kiểm tra Linux
+Để xuất CSV hoặc PNG, mở đường dẫn được notebook in ra và sao chép tệp cần dùng. RAW và sidecar của mỗi lần chạy được giữ cùng nhau để có thể kiểm định lại. Mỗi thư mục lượt chạy có tên riêng, không ghi đè kết quả trước.
 
-### Nhật ký kiểm tra ngày 18/11/2026
+## Nhật ký xác minh
 
-- Cơ sở: worktree sạch từ `origin/develop` tại `76c1799`.
-- Môi trường: Linux x86_64, kernel `7.0.0-43-generic`; `systemd-detect-virt` trả `none`; Python `3.14.4`; GCC `15.2.0`.
-- Gói đã cài từ `requirements-jupyter.txt`: NumPy `2.5.5`, SciPy `1.18.1`, Matplotlib `3.11.2`, pandas `3.1.1`, JupyterLab `4.6.6`, ipykernel `7.4.0`.
-- Lệnh cài: `python3 -m venv /tmp/cvm-tv2-jupyter-venv`, kích hoạt môi trường, rồi `python -m pip install -r requirements-jupyter.txt`.
-- Đã thực thi toàn bộ cell bằng `nbclient` trong kernel Python. `READ_EXISTING_P0` qua validator, tổng hợp lại thành 15 nhóm và tạo ba PNG từ RAW; 135 bản ghi hiển thị trong DataFrame. Khi đặt epsilon custom ngoài miền nhưng vẫn ở chế độ P0, notebook vẫn chạy. `SMOKE_LINUX` hiện `CHỜ API TV3`; `CUSTOM_SWEEP` chỉ xem trước cấu hình khi `RUN_CUSTOM = False`.
-- Kiểm tra hàm xác nhận môi trường: hệ điều hành hiện tại được nhận diện là Ubuntu Linux; `systemd-detect-virt --vm` và `--container` đều trả `none`.
-- Hệ thống báo không phát hiện máy ảo; trạng thái máy vật lý Ubuntu dual boot và thao tác chọn kernel trong giao diện JupyterLab chưa được xác minh độc lập.
+### Nhật ký ngày 18/11/2026
 
-**CHƯA XÁC MINH end-to-end trên Linux native theo yêu cầu nhóm.** API chạy notebook TV3 chưa có trong checkout này; smoke/custom thật chưa chạy. Sau khi ghép API TV1/TV3/TV4, cần kiểm tra trên máy Ubuntu dual boot, xác thực sidecar và lưu log gồm phiên bản Python, GCC, lệnh chạy, trạng thái validator và đường dẫn đầu ra. Không dùng kết quả P0 Windows để báo cáo số đo Linux.
+- Checkout sạch tại commit `5a3ef09`; cài mới từ `requirements-jupyter.txt` trong virtual environment bằng các lệnh ở trên. `pip check` không báo dependency lỗi.
+- Máy kiểm tra: Ubuntu 26.04.1 LTS, Linux `7.0.0-43-generic`, Python 3.14.4, GCC 15.2.0. Bộ kiểm tra notebook nhận diện Ubuntu/Linux; không phát hiện WSL, máy ảo hoặc container (`systemd-detect-virt --vm/--container`: `none`). Trạng thái dual boot vật lý không được xác minh độc lập.
+- Phiên bản môi trường: JupyterLab 4.6.6, ipykernel 7.4.0, NumPy 2.5.5, SciPy 1.18.1, Matplotlib 3.11.2, pandas 3.1.1. Đã đăng ký và chọn kernel `Python (CVM analysis)` trong JupyterLab.
+- **Run All trên giao diện JupyterLab:** chế độ mặc định `READ_EXISTING_P0` hoàn tất; TV4 báo `verified_real`, 135/135 success, 15 nhóm và ba hình runtime/RSS/peak sample. Đây là phân tích trên Linux đối với RAW P0 có provenance Windows.
+- **Chạy bằng kernel mới trong checkout sạch:** `READ_EXISTING_P0`, `SMOKE_LINUX`, `CUSTOM_SWEEP` ở chế độ xem trước và custom sweep nhỏ đều hoàn tất. Smoke tạo 2 bản ghi Linux `verified_real` và ba hình. Custom tạo 4 bản ghi Linux `verified_real` và sáu hình cho hai lát cắt cấu hình.
+- Dùng kernel notebook qua `nbclient` cho bốn chế độ trong checkout sạch; kiểm định độc lập của TV3/TV4 xác nhận RAW và sidecar. CSV, báo cáo và PNG của lần kiểm tra được ghi vào thư mục tạm, không đưa vào kho mã.
+
+Kết quả P0 trên Linux chỉ xác nhận việc đọc và phân tích dữ liệu. Không dùng P0 Windows để báo cáo số đo Linux.
