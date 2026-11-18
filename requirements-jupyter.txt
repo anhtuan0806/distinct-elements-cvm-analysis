@@ -1,0 +1,6 @@
+# Reuse the project's declared runtime dependencies; do not fork their versions.
+-r requirements.txt
+
+# Notebook runtime and IPython kernel.
+jupyterlab==4.6.6
+ipykernel==7.4.0
