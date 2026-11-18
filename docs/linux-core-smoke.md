@@ -122,13 +122,20 @@ compiler của helper. GCC/Clang trên Linux native trong task này đều **CH�
    `linux-core-smoke.commit`, `handoff.json` (hash bundle và commit). Không lấy tên
    branch/develop thay cho SHA nghiệm thu. Nếu dùng PR, lấy SHA thật chứa script
    và test này sau review; không dùng commit nền 76c1799 vốn chưa có chúng.
+   Xuất `.commit` bằng UTF-8 không BOM, chỉ SHA và một ký tự LF cuối dòng; với
+   Python dùng `write_bytes((sha + "\n").encode("utf-8"))` để tránh chuyển thành
+   CRLF trên Windows. Xuất JSON bằng `write_bytes` với UTF-8 tương tự;
+   `json.dumps(manifest, ensure_ascii=True, indent=2)` giữ nguyên Unicode khi đọc
+   lại, tránh mất dấu qua pipeline PowerShell. `native_acceptance` phải đọc lại
+   thành `CHƯA CHẠY`. Giữ SHA thật của log Windows nếu không chạy lại build/test
+   khi chỉ sửa tài liệu hoặc cách xuất gói.
 2. Trên máy Linux **cài trực tiếp/dual boot đã được thành viên xác nhận**, lấy một
    checkout riêng theo bundle/SHA. Ví dụ Bash với bộ bàn giao đã chép sang máy:
 
 ```bash
 set -euo pipefail
 TRANSFER=/duong/dan/bo-ban-giao
-SMOKE_SHA=$(cat "$TRANSFER/linux-core-smoke.commit")
+SMOKE_SHA=$(tr -d '\r\n' < "$TRANSFER/linux-core-smoke.commit")
 python3 - "$TRANSFER" "$SMOKE_SHA" <<'PY'
 import hashlib
 import json
@@ -136,7 +143,7 @@ import sys
 from pathlib import Path
 
 folder = Path(sys.argv[1])
-manifest = json.loads((folder / 'handoff.json').read_text())
+manifest = json.loads((folder / 'handoff.json').read_text(encoding='utf-8'))
 assert manifest['commit'] == sys.argv[2]
 actual_hash = hashlib.sha256((folder / 'linux-core-smoke.bundle').read_bytes()).hexdigest()
 assert actual_hash == manifest['bundle_sha256']
