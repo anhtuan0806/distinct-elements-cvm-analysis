@@ -38,7 +38,7 @@ if ($LASTEXITCODE -ne 0) { throw 'CVM-A1 tests failed' }
 
 File build nằm trong `build/a1/`, đã được Git bỏ qua. Đây là bộ test C++ độc lập;
 `pytest` chạy test Python và một số test gọi C++; workflow Ubuntu còn có bước C++
-standalone riêng. CI không thay thế nghiệm thu trên máy Linux native của nhóm.
+standalone riêng.
 
 Build/test tương đương bằng GCC trên Linux hoặc shell có `g++` hỗ trợ C++17:
 
@@ -50,10 +50,7 @@ g++ -std=c++17 -Wall -Wextra -Werror -pedantic -Isrc src/cvm/a1.cpp src/cvm_core
 python3 tests/cpp/check_cvm_core.py build/a1/cvm_core --log build/a1/metrics-smoke-gcc.json
 ```
 
-Đã build và kiểm thử với MSVC 19.41.34120 x64 trên Windows và GCC 14.2 trên Linux. Cả hai dùng C++17.
-Đây là ghi nhận lịch sử, không xác nhận Linux native cài trực tiếp. Task Linux core
-smoke hiện **CHƯA CHẠY trên Linux native**; dùng [quy trình bàn giao](linux-core-smoke.md)
-để lấy đúng commit, build và thu log trên máy mục tiêu thật.
+Build, smoke và kết quả nghiệm thu Linux native xem [Linux C++ Core](linux-core-smoke.md).
 
 Khởi tạo `cvm::A1(m, epsilon, delta, seed)`, gọi `update(id)` cho từng `std::uint64_t`,
 rồi gọi `result()` sau đúng `m` lượt đọc (tính cả ID lặp), hoặc ngay khi `aborted()` là
@@ -232,6 +229,5 @@ giảm mẫu; không lưu toàn bộ stream. Đây không phải RSS hoặc số
 nếu mỗi ID cần log2(n) bit thì riêng phần lưu ID tương ứng O(s log n) bit.
 
 Checklist, lệnh đã chạy và kết quả thực tế được ghi tại
-[bằng chứng P0 GĐ1](cvm-a1-p0-evidence.md). Quy trình và phần còn thiếu của nghiệm
-thu Linux native ở [Linux core smoke](linux-core-smoke.md). Nhóm còn cần xác nhận
+[bằng chứng P0 GĐ1](cvm-a1-p0-evidence.md). Nhóm còn cần xác nhận
 quy ước luồng rỗng; Runner hiện yêu cầu m dương dù CLI Core chấp nhận m = 0.
