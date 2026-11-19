@@ -1,0 +1,2 @@
+# The P0 manifest names the exact checksummed CSV bytes, including record line endings.
+notebooks/data/linux_p0/real/*.csv -text whitespace=cr-at-eol

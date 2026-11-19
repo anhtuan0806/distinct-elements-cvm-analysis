@@ -280,17 +280,26 @@ def test_plot_omits_unmeasured_ram(tmp_path):
     assert list(Path(tmp_path).iterdir()) == []
 
 
-def test_jupyter_windows_p0_matches_summary_cli(tmp_path):
+def test_jupyter_linux_p0_representative_matches_summary_cli(tmp_path):
     from scripts.analyze_results import main as analyze_cli
     from scripts.jupyter_analysis import analyze_jupyter_results
 
-    raw = Path(__file__).resolve().parents[1] / "results/real/tv4_timespace_p0_20261113.csv"
-    sidecar = raw.with_suffix(".metadata.json")
-    result = analyze_jupyter_results(raw, tmp_path)
-    assert result.raw.shape == (135, 24)
+    root = Path(__file__).resolve().parents[1]
+    dataset_root = root / "notebooks/data/linux_p0"
+    manifest = json.loads((dataset_root / "manifest.json").read_text(encoding="utf-8"))
+    item = next(
+        value
+        for value in manifest["inputs"]
+        if value["workload"] == "all_distinct" and value["m"] == 256
+    )
+    raw = dataset_root / item["raw"]
+    sidecar = dataset_root / item["sidecar"]
+
+    result = analyze_jupyter_results(raw, tmp_path / "api", metadata_path=sidecar)
+    assert result.raw.shape == (9, 24)
     assert tuple(result.raw.columns) == CSV_COLUMNS
-    assert len(result.summary) == 15
-    assert result.summary["success_count"].sum() == 135
+    assert len(result.summary) == 1
+    assert result.summary["success_count"].sum() == 9
     assert {path.name for path in result.png_paths} == {
         "timespace_runtime.png",
         "timespace_ram.png",
@@ -301,7 +310,7 @@ def test_jupyter_windows_p0_matches_summary_cli(tmp_path):
     assert result.provenance.raw_sha256 == hashlib.sha256(raw.read_bytes()).hexdigest()
     assert result.provenance.metadata_sha256 == hashlib.sha256(sidecar.read_bytes()).hexdigest()
     report = result.markdown_path.read_text(encoding="utf-8")
-    for expected in ("Windows P0", "MinGW", "44000", "84000", "135", "MiB", "Big-O"):
+    for expected in ("verified_real", "44000", "MiB", "Big-O"):
         assert expected in report
 
     cli_csv = tmp_path / "cli.csv"
