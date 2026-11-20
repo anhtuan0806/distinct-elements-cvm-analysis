@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "dataset_id": "timespace_scale_full",
+  "name": "CVM-A1 · SCALE tối ưu đầy đủ",
+  "raw": "data/scale-full.csv",
+  "raw_sha256": "REPLACE_WITH_RAW_SHA256",
+  "sidecar_sha256": "REPLACE_WITH_SIDECAR_SHA256",
+  "source_tree_sha256": "REPLACE_WITH_SOURCE_TREE_SHA256",
+  "generator_sha256": "REPLACE_WITH_GENERATOR_SHA256",
+  "binary_sha256": "REPLACE_WITH_BINARY_SHA256"
+}

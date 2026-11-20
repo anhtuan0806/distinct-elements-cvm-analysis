@@ -24,6 +24,15 @@ CONFIG = dict.fromkeys(("algorithm", "workload", "m", "n", "epsilon", "delta", "
 SEQUENCE = ("trial", "seed_generator", "seed_algorithm")
 IDENTITY = ("git_commit", "source_tree_sha256", "generator_sha256")
 ENVIRONMENT = ("python", "cpu", "binary_sha256")
+TRIAL_FIELDS = (
+    *IDENTITY,
+    *ENVIRONMENT,
+    "platform_os",
+    "compiler",
+    "build_flags",
+    *CONFIG,
+    *SEQUENCE,
+)
 SYNTHETIC = re.compile(r"synthetic|dry[-_ ]?run|mock", re.I)
 
 
@@ -255,6 +264,10 @@ def check_metadata(metadata, content, path, rows):
         raise ValueError("metadata batches do not cover all records")
 
 
+def completed_trial_key(row):
+    return tuple(row.get(name) for name in TRIAL_FIELDS)
+
+
 def validate(path, metadata_path=None):
     path = Path(path)
     metadata_path = Path(metadata_path) if metadata_path else path.with_suffix(".metadata.json")
@@ -335,18 +348,7 @@ def validate(path, metadata_path=None):
     report.rows = [row for row in rows if row is not None]
     for row in report.rows:
         if row["status"] in COMPLETED:
-            key = tuple(
-                row.get(name)
-                for name in (
-                    *IDENTITY,
-                    *ENVIRONMENT,
-                    "platform_os",
-                    "compiler",
-                    "build_flags",
-                    *CONFIG,
-                    *SEQUENCE,
-                )
-            )
+            key = completed_trial_key(row)
             if key in completed:
                 report.errors.append(f"duplicate completed trial: {row['run_id']}")
             completed.add(key)

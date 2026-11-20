@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+import itertools
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
+import pytest
+
 from src.cvm.build import build_cvm_core, detect_compiler_info, get_cvm_core_path
-from src.cvm.executor import run_cvm_a1_core
+from src.cvm.executor import _run_core, run_cvm_a1_core
 from src.stream_generator import Distribution, StreamConfig, generate_stream
 from src.types import ExperimentConfig, ExperimentStatus
 
@@ -122,6 +128,57 @@ class TestCVMCoreAdapter(unittest.TestCase):
         self.assertEqual(result.status, ExperimentStatus.EXECUTION_ERROR)
         self.assertIsNone(result.estimate)
         self.assertIn("Generator stream broken", str(result.error_msg))
+
+
+def test_streamed_chunks_and_concurrent_output():
+    script = """
+import hashlib
+import sys
+sys.stdout.write('a' * 48000)
+sys.stdout.flush()
+sys.stderr.write('b' * 48000)
+sys.stderr.flush()
+print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())
+"""
+    data = [1, (1 << 64) - 1, 0] * 20_000
+    expected = hashlib.sha256("".join(f"{item}\n" for item in data).encode()).hexdigest()
+    result = _run_core([sys.executable, "-c", script], iter(data), timeout=10)
+    assert result.returncode == 0
+    assert result.stdout == "a" * 48_000 + expected + "\n"
+    assert result.stderr == "b" * 48_000
+
+
+def test_early_exit_preserves_core_error():
+    script = "import sys; sys.stderr.write('invalid input\\n'); sys.exit(7)"
+    result = _run_core([sys.executable, "-c", script], itertools.repeat(0), timeout=10)
+    assert result.returncode == 7
+    assert result.stderr == "invalid input\n"
+
+
+def test_timeout_reaps_core_and_keeps_partial_stderr(monkeypatch):
+    processes = []
+    popen = subprocess.Popen
+
+    def start(*args, **kwargs):
+        process = popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr("src.cvm.executor.subprocess.Popen", start)
+    script = "import sys,time; print('waiting', file=sys.stderr, flush=True); time.sleep(60)"
+    with pytest.raises(subprocess.TimeoutExpired) as exc:
+        _run_core([sys.executable, "-c", script], itertools.repeat(0), timeout=1)
+    assert exc.value.stderr == "waiting\n"
+    [process] = processes
+    assert process.poll() is not None
+    assert process.stdin.closed and process.stdout.closed and process.stderr.closed
+
+
+@pytest.mark.parametrize("pipe", ["stdout", "stderr"])
+def test_excessive_core_output_is_bounded(pipe):
+    script = f"import sys,time; sys.{pipe}.write('!' * 1000000); time.sleep(60)"
+    with pytest.raises(ValueError, match="exceeded 65536 bytes"):
+        _run_core([sys.executable, "-c", script], itertools.repeat(0), timeout=10)
 
 
 if __name__ == "__main__":

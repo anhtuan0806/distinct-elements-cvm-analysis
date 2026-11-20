@@ -4,7 +4,6 @@ import csv
 import hashlib
 import json
 import subprocess
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -15,11 +14,8 @@ from src.types import CSV_COLUMNS, ExperimentConfig, ExperimentStatus
 
 
 def fake_core(monkeypatch, stdout, threshold=1201):
-    process = MagicMock()
-    process.__enter__.return_value = process
-    process.communicate.return_value = (stdout, "")
-    process.returncode = 0
-    monkeypatch.setattr("src.cvm.executor.subprocess.Popen", lambda *args, **kwargs: process)
+    process = subprocess.CompletedProcess([], 0, stdout, "")
+    monkeypatch.setattr("src.cvm.executor._run_core", lambda *args, **kwargs: process)
     monkeypatch.setattr("src.cvm.executor.query_core_threshold", lambda *_: threshold)
 
 
@@ -46,7 +42,7 @@ def test_stream_output_must_match_core_threshold_query(monkeypatch, m, epsilon, 
 )
 def test_rejects_unsupported_or_invalid_threshold_query(monkeypatch, tmp_path, code, stdout):
     response = subprocess.CompletedProcess([], code, stdout, "unsupported format" if code else "")
-    monkeypatch.setattr("src.cvm.executor.subprocess.run", lambda *args, **kwargs: response)
+    monkeypatch.setattr("src.cvm.executor._run_core", lambda *args, **kwargs: response)
     cfg = ExperimentConfig(8, 1, 1, 0.3, 0.125, 42, 42)
     with pytest.raises(ValueError, match="threshold"):
         query_core_threshold(tmp_path / "core", cfg)

@@ -10,6 +10,7 @@ import platform
 import subprocess
 import sys
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -97,8 +98,21 @@ def run_single_trial(
     *,
     binary: Path | None = None,
     binary_sha256: str | None = None,
+    on_event: Callable[..., None] | None = None,
 ) -> CVMResult:
     config = dataclasses.replace(config, compiler=compiler, build_flags=build_flags)
+    options = {}
+    if on_event is not None:
+        trial_fields = {
+            "m": config.m, "workload": config.workload, "trial": config.trial,
+            "run_id": config.run_id,
+        }
+
+        def process_event(event, **details):
+            on_event(event, **trial_fields, **details)
+
+        on_event("trial_started", **trial_fields)
+        options["on_process"] = process_event
     stream = generate_stream(
         StreamConfig(
             config.m,
@@ -119,7 +133,7 @@ def run_single_trial(
             snapshot.write_bytes(executable)
             snapshot.chmod(0o500)
             try:
-                result = run_cvm_a1_core(config, stream, snapshot)
+                result = run_cvm_a1_core(config, stream, snapshot, **options)
                 if hashlib.sha256(snapshot.read_bytes()).hexdigest() != binary_sha256:
                     raise ValueError("Core trial snapshot changed; trial was not recorded")
             finally:
@@ -127,8 +141,13 @@ def run_single_trial(
         if hashlib.sha256(binary.read_bytes()).hexdigest() != binary_sha256:
             raise ValueError("Core binary changed during the batch; trial was not recorded")
     else:
-        result = run_cvm_a1_core(config, stream, binary)
+        result = run_cvm_a1_core(config, stream, binary, **options)
     writer.write_record(config, result)
+    if on_event is not None:
+        on_event(
+            "trial_finished", **trial_fields, status=result.status.value,
+            error=result.error_msg[:500] if result.error_msg else None,
+        )
 
     if result.error_msg:
         logger.error("Trial %d, status=%s: %s", config.trial, result.status.value, result.error_msg)
@@ -144,7 +163,7 @@ def run_single_trial(
     return result
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, on_event: Callable[..., None] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     args = parse_args(argv)
     mode = "synthetic_mock" if args.dry_run else "real"
@@ -183,6 +202,11 @@ def main(argv: list[str] | None = None) -> int:
         batch = _batch(base, 2 if args.dry_run else args.trials, mode, info)
         failed = False
         with BenchmarkReport.open(output, mode, batch) as writer:
+            if on_event is not None:
+                stat = output.stat()
+                on_event(
+                    "raw_opened", raw=str(output), bytes=stat.st_size, mtime_ns=stat.st_mtime_ns
+                )
             if args.dry_run:
                 run_dry_run(base, writer)
                 return 0
@@ -204,11 +228,14 @@ def main(argv: list[str] | None = None) -> int:
                     info["build_flags"],
                     binary=binary,
                     binary_sha256=info["binary_sha256"],
+                    on_event=on_event,
                 )
                 failed |= result.status in (
                     ExperimentStatus.EXECUTION_ERROR,
                     ExperimentStatus.RESOURCE_FAILURE,
                 )
+                if failed and on_event is not None:
+                    break
         return 1 if failed else 0
     except (
         OSError,

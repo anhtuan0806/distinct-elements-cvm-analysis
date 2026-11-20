@@ -4,3 +4,4 @@
 # Notebook runtime and IPython kernel.
 jupyterlab==4.6.6
 ipykernel==7.4.0
+psutil>=5.9
