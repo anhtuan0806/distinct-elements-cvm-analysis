@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import bisect
 import random
+from array import array
 from dataclasses import dataclass
 from enum import Enum
 from typing import Iterator
 
 UINT64_MAX = (1 << 64) - 1
+_COMPACT_MIN_SAMPLE = 65_536
+_ARRAY_UINT_BITS = 8 * array("I").itemsize
 
 
 class Distribution(str, Enum):
@@ -66,8 +69,41 @@ class StreamConfig:
             raise ValueError("all_distinct requires f0=m")
 
 
-def _sample_unique_values(rng: random.Random, population_size: int, sample_size: int) -> list[int]:
+def _uint_type(maximum: int) -> str:
+    return "I" if maximum < 1 << _ARRAY_UINT_BITS else "Q"
+
+
+def _sample_compact(rng: random.Random, population_size: int, sample_size: int) -> array:
+    typecode = _uint_type(population_size - 1)
+    if sample_size == population_size:
+        # Floyd's selected set is [0, upper_bound) at every step here.
+        # Keep the draws even though the inserted value is always upper_bound.
+        for stop in range(1, population_size + 1):
+            rng.randrange(stop)
+        selected = array(typecode, range(population_size))
+    else:
+        selected = array(typecode)
+        membership = bytearray((population_size + 7) // 8)
+        for upper_bound in range(population_size - sample_size, population_size):
+            candidate = rng.randrange(upper_bound + 1)
+            bucket, bit = candidate >> 3, 1 << (candidate & 7)
+            if membership[bucket] & bit:
+                candidate = upper_bound
+                bucket, bit = candidate >> 3, 1 << (candidate & 7)
+            membership[bucket] |= bit
+            selected.append(candidate)
+    rng.shuffle(selected)
+    return selected
+
+
+def _sample_unique_values(
+    rng: random.Random, population_size: int, sample_size: int, *, compact: bool = False
+) -> list[int] | array:
     """Sample without replacement without materializing the full population."""
+    # At most eight bytes of membership state per selected ID.
+    if compact and sample_size >= _COMPACT_MIN_SAMPLE and population_size <= 64 * sample_size:
+        return _sample_compact(rng, population_size, sample_size)
+
     selected: list[int] = []
     selected_set: set[int] = set()
 
@@ -105,6 +141,38 @@ def _weights(distribution: Distribution, count: int) -> list[float]:
     raise ValueError(f"{distribution.value} does not use weighted sampling")
 
 
+def _iter_uniform(config: StreamConfig, rng: random.Random) -> Iterator[int]:
+    values = _sample_unique_values(rng, config.n, config.f0, compact=True)
+    if isinstance(values, array):
+        values = array(values.typecode, sorted(values))
+    else:
+        values.sort()
+
+    positions = _sample_unique_values(rng, config.m, config.f0, compact=True)
+    rng.shuffle(positions)
+    if isinstance(positions, array) and config.m <= 8 * config.f0:
+        # Zero denotes an unforced position. Store ranks + 1 so ID 0 is valid.
+        ranks = array(_uint_type(config.f0), [0]) * config.m
+        for rank, position in enumerate(positions, 1):
+            ranks[position] = rank
+        del positions
+        for rank in ranks:
+            index = rank - 1 if rank else min(int(rng.random() * config.f0), config.f0 - 1)
+            yield values[index]
+    else:
+        forced_values = dict(zip(positions, values, strict=True))
+        del positions
+        for position in range(config.m):
+            forced = forced_values.get(position)
+            # Integer cumulative weights 1..F0 are exactly representable here.
+            # floor(target) gives the same index as bisect_right on those weights.
+            if forced is None:
+                index = min(int(rng.random() * config.f0), config.f0 - 1)
+                yield values[index]
+            else:
+                yield forced
+
+
 def _iter_stream(config: StreamConfig, rng: random.Random) -> Iterator[int]:
     if config.distribution is Distribution.ALL_DUPLICATE:
         value = rng.randrange(config.n)
@@ -112,12 +180,15 @@ def _iter_stream(config: StreamConfig, rng: random.Random) -> Iterator[int]:
             yield value
         return
 
-    values = _sample_unique_values(rng, config.n, config.f0)
     if config.distribution is Distribution.ALL_DISTINCT:
-        yield from values
+        yield from _sample_unique_values(rng, config.n, config.f0, compact=True)
+        return
+    if config.distribution is Distribution.UNIFORM and config.f0 <= 2**53:
+        yield from _iter_uniform(config, rng)
         return
 
     # Numeric ID order defines rank for the weighted distributions.
+    values = _sample_unique_values(rng, config.n, config.f0)
     values.sort()
 
     positions = _sample_unique_values(rng, config.m, config.f0)

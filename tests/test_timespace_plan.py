@@ -3,7 +3,17 @@ import os
 import subprocess
 import sys
 
-from scripts.generate_timespace_plan import DEFAULT_PLAN, generate_plan, runner_args, write_plan
+import pytest
+
+from scripts.generate_timespace_plan import (
+    DEFAULT_PLAN,
+    SCALE_PLAN,
+    generate_plan,
+    main,
+    runner_args,
+    validate_scale_rows,
+    write_plan,
+)
 from src.cli import args_to_config, parse_args
 from src.stream_generator import Distribution, StreamConfig
 
@@ -51,3 +61,75 @@ def test_preview_round_trips_unicode_paths_on_ascii_stdout(tmp_path):
     commands = [json.loads(line) for line in preview.stdout.splitlines()[1:]]
     assert len(commands) == 3
     assert all(command[command.index("--out") + 1] == str(raw.resolve()) for command in commands)
+
+
+def test_scale_plan_is_reproducible_and_fits_runner_and_core_types(tmp_path):
+    output = tmp_path / "scale.csv"
+    write_plan(output, scale=True)
+    assert output.read_bytes() == SCALE_PLAN.read_bytes()
+    rows = list(generate_plan(scale=True))
+    assert sorted({row.m for row in rows}) == [
+        100_000,
+        200_000,
+        500_000,
+        1_000_000,
+        2_000_000,
+        5_000_000,
+        10_000_000,
+        20_000_000,
+        50_000_000,
+        100_000_000,
+    ]
+    assert len(rows) == 30 and sum(row.trials for row in rows) == 270
+    assert {(row.n, row.epsilon, row.delta) for row in rows} == {(100_000_000, 0.5, 0.05)}
+    assert {(row.first_trial, row.seed_generator, row.seed_algorithm) for row in rows} == {
+        (1, 44000, 84000)
+    }
+    for row in rows:
+        config = args_to_config(parse_args(runner_args(row, tmp_path / "raw.csv")))
+        StreamConfig(
+            config.m, config.n, config.f0, Distribution(config.workload), config.seed_generator
+        )
+        assert config.s == row.s_reference
+        assert (
+            config.f0
+            == {"all_duplicate": 1, "uniform": row.m // 4, "all_distinct": row.m}[row.workload]
+        )
+    assert max(row.s_reference for row in rows) == 1628
+
+
+def test_scale_preview_selects_subset_and_real_run_requires_explicit_m(tmp_path, capsys):
+    raw = tmp_path / "raw.csv"
+    assert (
+        main(["--preview", "SCALE", "--m", "200000", "--workload", "uniform", "--raw", str(raw)])
+        == 0
+    )
+    heading, command = capsys.readouterr().out.splitlines()
+    assert heading == "1 configurations, 9 real trials"
+    args = json.loads(command)
+    assert args[args.index("--m") + 1] == "200000"
+    assert args[args.index("--workload") + 1] == "uniform"
+    assert not raw.exists()
+    with pytest.raises(SystemExit) as result:
+        main(["--run", "SCALE", "--raw", str(raw)])
+    assert result.value.code == 2 and "explicit --m" in capsys.readouterr().err
+    assert not raw.exists()
+
+
+def test_scale_resume_validates_configuration_and_seed():
+    row = {
+        "m": 100_000,
+        "F0": 25_000,
+        "workload": "uniform",
+        "n": 100_000_000,
+        "epsilon": 0.5,
+        "delta": 0.05,
+        "trial": 9,
+        "seed_generator": 44008,
+        "seed_algorithm": 84008,
+    }
+    validate_scale_rows([row])
+    with pytest.raises(ValueError, match="seed schedule"):
+        validate_scale_rows([dict(row, seed_generator=44009)])
+    with pytest.raises(ValueError, match="outside the SCALE plan"):
+        validate_scale_rows([dict(row, m=256)])

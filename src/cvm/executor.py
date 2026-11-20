@@ -2,18 +2,27 @@
 
 from __future__ import annotations
 
+import errno
+import io
 import math
 import os
 import subprocess
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
+from itertools import islice
 from pathlib import Path
+from threading import Event, Timer
+from typing import BinaryIO
 
 from src.cvm.build import build_cvm_core, get_cvm_core_path
 from src.cvm.process_memory import peak_memory
 from src.types import CVMResult, ExperimentConfig, ExperimentStatus, compute_cvm_threshold
 
 MAX_WIRE_THRESHOLD = (1 << 64) - 1
+_CHUNK_ITEMS = 8192
+_OUTPUT_LIMIT = 64 * 1024
+_TRIAL_TIMEOUT_SECONDS = 600
 
 
 def _parse_threshold(text: str) -> int:
@@ -41,16 +50,98 @@ def _core_command(binary: Path, config: ExperimentConfig, output_format: str) ->
     ]
 
 
-def query_core_threshold(binary: Path, config: ExperimentConfig) -> int:
-    result = subprocess.run(
-        _core_command(binary, config, "threshold-v1"),
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=15,
+def _read_output(pipe: BinaryIO, proc: subprocess.Popen) -> bytes:
+    with io.BufferedReader(pipe) as reader:
+        data = reader.read(_OUTPUT_LIMIT + 1)
+    if len(data) > _OUTPUT_LIMIT:
+        proc.kill()
+    return data
+
+
+def _write_input(pipe: BinaryIO, proc: subprocess.Popen, stream: Iterable[int]) -> None:
+    items = iter(stream)
+    try:
+        while proc.poll() is None:
+            chunk = "".join(f"{item}\n" for item in islice(items, _CHUNK_ITEMS))
+            if not chunk:
+                return
+            # Unbuffered pipe writes can accept only part of a chunk.
+            remaining = memoryview(chunk.encode("utf-8"))
+            while remaining:
+                try:
+                    written = pipe.write(remaining)
+                except OSError as exc:
+                    if not (
+                        isinstance(exc, BrokenPipeError)
+                        or (os.name == "nt" and exc.errno == errno.EINVAL)
+                    ):
+                        raise
+                    # Core can close stdin early on an abort or input error.
+                    # The exit code and csv-v2 response determine the result.
+                    return
+                remaining = remaining[written:]
+    finally:
+        pipe.close()
+
+
+def _run_core(
+    cmd: list[str],
+    stream: Iterable[int],
+    timeout: float,
+    *,
+    on_process: Callable[..., None] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    with (
+        subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=0,
+            env={**os.environ, "CVM_TV3_PEAK_RSS": "1"},
+        ) as proc,
+        ThreadPoolExecutor(max_workers=2) as readers,
+    ):
+        assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
+        expired = Event()
+
+        def on_timeout() -> None:
+            expired.set()
+            proc.kill()
+
+        timer = Timer(timeout, on_timeout)
+        timer.start()
+        try:
+            if on_process is not None:
+                on_process("core_started", pid=proc.pid, executable=cmd[0])
+            # Drain both pipes while stdin is being sent to avoid pipe backpressure.
+            stdout_read = readers.submit(_read_output, proc.stdout, proc)
+            stderr_read = readers.submit(_read_output, proc.stderr, proc)
+            _write_input(proc.stdin, proc, stream)
+            proc.wait()
+            stdout, stderr = stdout_read.result(), stderr_read.result()
+        except BaseException:
+            proc.kill()
+            raise
+        finally:
+            timer.cancel()
+            timer.join()
+            if on_process is not None:
+                proc.wait()
+                on_process("core_finished", pid=proc.pid, returncode=proc.returncode)
+
+    diagnostic = stderr[:_OUTPUT_LIMIT].decode("utf-8", "replace")
+    if expired.is_set():
+        raise subprocess.TimeoutExpired(cmd, timeout, stderr=diagnostic)
+    if max(len(stdout), len(stderr)) > _OUTPUT_LIMIT:
+        raise ValueError(f"Core stdout/stderr exceeded {_OUTPUT_LIMIT} bytes: {diagnostic.strip()}")
+    return subprocess.CompletedProcess(
+        cmd, proc.returncode, stdout.decode("utf-8", "replace"), diagnostic
     )
+
+
+def query_core_threshold(binary: Path, config: ExperimentConfig) -> int:
+    result = _run_core(_core_command(binary, config, "threshold-v1"), (), timeout=15)
     if result.returncode != 0:
         raise ValueError(
             f"Core threshold-v1 query failed (exit {result.returncode}); "
@@ -71,6 +162,8 @@ def run_cvm_a1_core(
     config: ExperimentConfig,
     stream: Iterable[int],
     binary_path: Path | str | None = None,
+    *,
+    on_process: Callable[..., None] | None = None,
 ) -> CVMResult:
     start = time.perf_counter()
     peak_bytes = None
@@ -80,30 +173,15 @@ def run_cvm_a1_core(
         expected_s = query_core_threshold(binary, config)
         # Keep the independent query outside the measured trial.
         start = time.perf_counter()
-        input_data = "".join(f"{item}\n" for item in stream)
         cmd = _core_command(binary, config, "csv-v2")
-        with subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env={**os.environ, "CVM_TV3_PEAK_RSS": "1"},
-        ) as proc:
-            try:
-                stdout, stderr = proc.communicate(input=input_data)
-            except BaseException:
-                proc.kill()
-                raise
-            elapsed_ms = (time.perf_counter() - start) * 1000
-            peak_bytes, stderr = peak_memory(stderr)
+        options = {"on_process": on_process} if on_process is not None else {}
+        process = _run_core(cmd, stream, timeout=_TRIAL_TIMEOUT_SECONDS, **options)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        peak_bytes, stderr = peak_memory(process.stderr)
+        if process.returncode != 0:
+            raise ValueError(f"Core exit {process.returncode}: {stderr.strip() or 'empty stderr'}")
 
-        if proc.returncode != 0:
-            raise ValueError(f"Core exit {proc.returncode}: {stderr.strip() or 'empty stderr'}")
-
-        record = stdout.removesuffix("\n").removesuffix("\r")
+        record = process.stdout.removesuffix("\n").removesuffix("\r")
         fields = record.split(",")
         if len(fields) != 6 or "\n" in record or "\r" in record:
             raise ValueError(f"Invalid csv-v2 output: {record!r}")
@@ -155,7 +233,10 @@ def run_cvm_a1_core(
     except Exception as exc:
         status = ExperimentStatus.EXECUTION_ERROR
         reason = str(exc)
-        if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:
+        if (
+            isinstance(exc, (subprocess.CalledProcessError, subprocess.TimeoutExpired))
+            and exc.stderr
+        ):
             reason += f": {exc.stderr.strip()}"
     return CVMResult(
         status=status,
