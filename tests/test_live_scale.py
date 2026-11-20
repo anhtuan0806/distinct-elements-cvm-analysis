@@ -24,7 +24,9 @@ def test_live_profiles_preserve_the_published_scale_schedule():
 def test_core_observer_reports_actual_process_and_exit():
     events = []
     result = _run_core(
-        [sys.executable, "-c", "import os; print(os.getpid())"], (), timeout=10,
+        [sys.executable, "-c", "import os; print(os.getpid())"],
+        (),
+        timeout=10,
         on_process=lambda event, **fields: events.append((event, fields)),
     )
     pid = int(result.stdout)
@@ -43,7 +45,9 @@ def test_live_preflight_failure_records_zero_and_does_not_create_raw(tmp_path, m
     assert live_scale.supervise(tmp_path, live_scale.QUICK_MODE, 1234) == 1
     state = json.loads((tmp_path / live_scale.STATUS_NAME).read_text())
     assert (state["status"], state["successful_trials"], state["planned_trials"]) == (
-        "failed", 0, 12,
+        "failed",
+        0,
+        12,
     )
     assert state["reason"] == "fixture: native check failed"
     assert not (tmp_path / live_scale.RAW_NAME).exists()
@@ -60,7 +64,8 @@ def test_supervisor_rejects_existing_raw_before_work(tmp_path):
 def test_live_memory_gate_rejects_batch_before_popen(tmp_path, monkeypatch):
     monkeypatch.setattr(live_scale, "_check_other_benchmarks", lambda: None)
     monkeypatch.setattr(
-        live_scale, "psutil",
+        live_scale,
+        "psutil",
         SimpleNamespace(
             virtual_memory=lambda: SimpleNamespace(available=live_scale.MEMORY_RESERVE),
             swap_memory=lambda: SimpleNamespace(used=0),

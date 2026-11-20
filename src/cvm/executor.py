@@ -91,14 +91,17 @@ def _run_core(
     *,
     on_process: Callable[..., None] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    with subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=0,
-        env={**os.environ, "CVM_TV3_PEAK_RSS": "1"},
-    ) as proc, ThreadPoolExecutor(max_workers=2) as readers:
+    with (
+        subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=0,
+            env={**os.environ, "CVM_TV3_PEAK_RSS": "1"},
+        ) as proc,
+        ThreadPoolExecutor(max_workers=2) as readers,
+    ):
         assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
         expired = Event()
 
@@ -230,7 +233,10 @@ def run_cvm_a1_core(
     except Exception as exc:
         status = ExperimentStatus.EXECUTION_ERROR
         reason = str(exc)
-        if isinstance(exc, (subprocess.CalledProcessError, subprocess.TimeoutExpired)) and exc.stderr:
+        if (
+            isinstance(exc, (subprocess.CalledProcessError, subprocess.TimeoutExpired))
+            and exc.stderr
+        ):
             reason += f": {exc.stderr.strip()}"
     return CVMResult(
         status=status,

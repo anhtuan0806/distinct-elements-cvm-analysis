@@ -48,7 +48,11 @@ RAW_NAME = "scale-live.csv"
 EVENTS_NAME = "events.jsonl"
 STATUS_NAME = "run-provenance.json"
 COMPETING_PROGRAMS = {
-    "runner.py", "cvm_core", "cvm_core.exe", "run_scale.py", "run_optimized.py",
+    "runner.py",
+    "cvm_core",
+    "cvm_core.exe",
+    "run_scale.py",
+    "run_optimized.py",
     "run_full_scale.py",
 }
 
@@ -90,8 +94,13 @@ def _now() -> str:
 
 
 def _emit(path: Path, event: str, **fields) -> None:
-    entry = {"event": event, "time": _now(), "monotonic": time.monotonic(),
-             "emitter_pid": os.getpid(), **fields}
+    entry = {
+        "event": event,
+        "time": _now(),
+        "monotonic": time.monotonic(),
+        "emitter_pid": os.getpid(),
+        **fields,
+    }
     # Each short JSON line uses one append write, including writes by the Runner.
     with path.open("ab", buffering=0) as stream:
         line = (json.dumps(entry, ensure_ascii=False) + "\n").encode()
@@ -140,8 +149,7 @@ def _check_other_benchmarks() -> None:
 
 
 def _forecast(row: PlanRow, previous: dict | None) -> tuple[int, int]:
-    compact = {"all_duplicate": 0, "all_distinct": 8 * row.m,
-               "uniform": 72 * row.f0 + 6 * row.m}
+    compact = {"all_duplicate": 0, "all_distinct": 8 * row.m, "uniform": 72 * row.f0 + 6 * row.m}
     analytic = 128 * MIB + compact[row.workload]
     empirical = 0
     seconds = 0
@@ -213,22 +221,45 @@ def _run_batch(
     batch_log = directory / "logs" / f"{stem}.log"
     raw = directory / RAW_NAME
     command = [
-        "/usr/bin/time", "-v", "-o", str(time_log), "prlimit", f"--as={address_limit}", "--",
-        sys.executable, "-m", "scripts.live_scale", "worker", str(events), *runner_args(row, raw),
+        "/usr/bin/time",
+        "-v",
+        "-o",
+        str(time_log),
+        "prlimit",
+        f"--as={address_limit}",
+        "--",
+        sys.executable,
+        "-m",
+        "scripts.live_scale",
+        "worker",
+        str(events),
+        *runner_args(row, raw),
     ]
     start = time.monotonic()
     peak = 0
     min_available = available
     max_swap_growth = 0
     context = {"m": row.m, "workload": row.workload}
-    _emit(events, "batch_started", **context, trials=row.trials, available_bytes=available,
-          forecast_bytes=forecast, address_space_limit_bytes=address_limit, timeout_seconds=timeout)
+    _emit(
+        events,
+        "batch_started",
+        **context,
+        trials=row.trials,
+        available_bytes=available,
+        forecast_bytes=forecast,
+        address_space_limit_bytes=address_limit,
+        timeout_seconds=timeout,
+    )
     with batch_log.open("x", encoding="utf-8") as stream:
         stream.write(json.dumps(command, ensure_ascii=False) + "\n")
         stream.flush()
         process = subprocess.Popen(
-            command, cwd=PROJECT_ROOT, start_new_session=True, stdin=subprocess.DEVNULL,
-            stdout=stream, stderr=subprocess.STDOUT,
+            command,
+            cwd=PROJECT_ROOT,
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=stream,
+            stderr=subprocess.STDOUT,
             env={**os.environ, "LC_ALL": "C", "PYTHONDONTWRITEBYTECODE": "1"},
         )
         try:
@@ -242,8 +273,14 @@ def _run_batch(
                 peak = max(peak, rss)
                 min_available = min(min_available, available)
                 max_swap_growth = max(max_swap_growth, swap_growth)
-                _emit(events, "resource_sample", **context, pipeline_rss_bytes=rss,
-                      available_bytes=available, swap_growth_bytes=swap_growth)
+                _emit(
+                    events,
+                    "resource_sample",
+                    **context,
+                    pipeline_rss_bytes=rss,
+                    available_bytes=available,
+                    swap_growth_bytes=swap_growth,
+                )
                 if available < MEMORY_RESERVE or swap_growth > SWAP_GROWTH_LIMIT:
                     raise RuntimeError(f"Đã chạm giới hạn RAM/swap tại m={row.m}, {row.workload}.")
                 if elapsed > timeout:
@@ -260,9 +297,12 @@ def _run_batch(
             if process.returncode != 0:
                 _stop_group(process)
             outcome = {
-                **context, "peak_pipeline_bytes": max(peak, _time_peak(time_log)),
-                "min_available_bytes": min_available, "max_swap_growth_bytes": max_swap_growth,
-                "elapsed_seconds": time.monotonic() - start, "returncode": process.returncode,
+                **context,
+                "peak_pipeline_bytes": max(peak, _time_peak(time_log)),
+                "min_available_bytes": min_available,
+                "max_swap_growth_bytes": max_swap_growth,
+                "elapsed_seconds": time.monotonic() - start,
+                "returncode": process.returncode,
             }
             _emit(events, "batch_finished", **outcome)
     return outcome
@@ -309,8 +349,10 @@ def _checkpoint(raw: Path, expected: dict, fingerprint: dict) -> dict:
             raise ValueError(f"Trial LIVE thiếu Peak RSS hoặc sai ngưỡng s: {key}.")
     statuses = Counter(row["status"] for row in report.rows)
     return {
-        "successful_trials": statuses["success"], "recorded_trials": len(report.rows),
-        "raw_verified": report.verified, "statuses": dict(statuses),
+        "successful_trials": statuses["success"],
+        "recorded_trials": len(report.rows),
+        "raw_verified": report.verified,
+        "statuses": dict(statuses),
         "raw_sha256": report.metadata.get("sha256") if report.verified else None,
         "sidecar_sha256": report.metadata_sha256 if report.verified else None,
     }
@@ -342,14 +384,24 @@ def supervise(directory: Path, mode: str, kernel_pid: int) -> int:
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, request_stop)
     rows = live_plan(mode)
-    expected = {(row.m, row.workload, row.first_trial + i): row
-                for row in rows for i in range(row.trials)}
+    expected = {
+        (row.m, row.workload, row.first_trial + i): row for row in rows for i in range(row.trials)
+    }
     state = {
-        "mode": mode, "live_run_id": directory.name, "started_at": _now(),
-        "kernel_pid": kernel_pid, "supervisor_pid": os.getpid(), "status": "running",
-        "planned_trials": len(expected), "requested_plan": [asdict(row) for row in rows],
-        "raw": RAW_NAME, "sidecar": sidecar.name, "events": EVENTS_NAME,
-        "successful_trials": 0, "recorded_trials": 0, "raw_verified": False,
+        "mode": mode,
+        "live_run_id": directory.name,
+        "started_at": _now(),
+        "kernel_pid": kernel_pid,
+        "supervisor_pid": os.getpid(),
+        "status": "running",
+        "planned_trials": len(expected),
+        "requested_plan": [asdict(row) for row in rows],
+        "raw": RAW_NAME,
+        "sidecar": sidecar.name,
+        "events": EVENTS_NAME,
+        "successful_trials": 0,
+        "recorded_trials": 0,
+        "raw_verified": False,
     }
     _save_status(directory, state)
     _emit(events, "run_started", mode=mode, total_trials=len(expected), kernel_pid=kernel_pid)
@@ -370,11 +422,12 @@ def supervise(directory: Path, mode: str, kernel_pid: int) -> int:
             configuration = args_to_config(parse_args(runner_args(rows[0], raw)))
             fingerprint = runner._batch(configuration, rows[0].trials, "real", core)
             state["pipeline"] = {
-                name: fingerprint[name] for name in
-                ("git_commit", "source_tree_sha256", "generator_sha256", "environment")
+                name: fingerprint[name]
+                for name in ("git_commit", "source_tree_sha256", "generator_sha256", "environment")
             }
             state["resource_limits"] = {
-                "reserve_bytes": MEMORY_RESERVE, "max_swap_growth_bytes": SWAP_GROWTH_LIMIT,
+                "reserve_bytes": MEMORY_RESERVE,
+                "max_swap_growth_bytes": SWAP_GROWTH_LIMIT,
                 "initial_available_bytes": psutil.virtual_memory().available,
                 "initial_disk_free_bytes": shutil.disk_usage(directory).free,
                 "cpu": platform.processor() or platform.machine(),
@@ -403,15 +456,17 @@ def supervise(directory: Path, mode: str, kernel_pid: int) -> int:
         state["finished_at"] = _now()
         _save_status(directory, state)
         _emit(
-            events, "run_finished", status=state["status"], reason=state.get("reason"),
-            successful_trials=state["successful_trials"], recorded_trials=state["recorded_trials"],
+            events,
+            "run_finished",
+            status=state["status"],
+            reason=state.get("reason"),
+            successful_trials=state["successful_trials"],
+            recorded_trials=state["recorded_trials"],
         )
     return 0 if state["status"] == "complete" else 1
 
 
-def run_live_scale(
-    directory: Path, mode: str, on_event: Callable[[dict], None]
-) -> dict:
+def run_live_scale(directory: Path, mode: str, on_event: Callable[[dict], None]) -> dict:
     """From Jupyter, launch a fresh supervisor and relay its durable events."""
     directory = directory.resolve()
     events = directory / EVENTS_NAME
@@ -432,10 +487,20 @@ def run_live_scale(
 
     with (directory / "supervisor.log").open("x", encoding="utf-8") as stream:
         worker = subprocess.Popen(
-            [sys.executable, "-m", "scripts.live_scale", "supervise", str(directory),
-             mode, str(os.getpid())],
-            cwd=PROJECT_ROOT, start_new_session=True, stdin=subprocess.DEVNULL,
-            stdout=stream, stderr=subprocess.STDOUT,
+            [
+                sys.executable,
+                "-m",
+                "scripts.live_scale",
+                "supervise",
+                str(directory),
+                mode,
+                str(os.getpid()),
+            ],
+            cwd=PROJECT_ROOT,
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=stream,
+            stderr=subprocess.STDOUT,
             env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
         )
         try:
@@ -456,10 +521,15 @@ def run_live_scale(
     if not status_path.is_file():
         if interrupted:
             state = {
-                "status": "interrupted", "reason": "Đã dừng trước khi supervisor khởi tạo.",
-                "live_run_id": directory.name, "mode": mode, "finished_at": _now(),
+                "status": "interrupted",
+                "reason": "Đã dừng trước khi supervisor khởi tạo.",
+                "live_run_id": directory.name,
+                "mode": mode,
+                "finished_at": _now(),
                 "planned_trials": sum(row.trials for row in live_plan(mode)),
-                "successful_trials": 0, "recorded_trials": 0, "raw_verified": False,
+                "successful_trials": 0,
+                "recorded_trials": 0,
+                "raw_verified": False,
             }
             _save_status(directory, state)
             return state

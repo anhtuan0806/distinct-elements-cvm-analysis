@@ -104,7 +104,9 @@ def run_single_trial(
     options = {}
     if on_event is not None:
         trial_fields = {
-            "m": config.m, "workload": config.workload, "trial": config.trial,
+            "m": config.m,
+            "workload": config.workload,
+            "trial": config.trial,
             "run_id": config.run_id,
         }
 
@@ -145,7 +147,9 @@ def run_single_trial(
     writer.write_record(config, result)
     if on_event is not None:
         on_event(
-            "trial_finished", **trial_fields, status=result.status.value,
+            "trial_finished",
+            **trial_fields,
+            status=result.status.value,
             error=result.error_msg[:500] if result.error_msg else None,
         )
 

@@ -813,9 +813,10 @@ def scale_full_manifest(tmp_path, monkeypatch):
         "raw": "../dataset/full.csv",
         "raw_sha256": "b" * 64,
         "sidecar_sha256": "c" * 64,
-        **{field: identity[field] for field in (
-            "source_tree_sha256", "generator_sha256", "binary_sha256"
-        )},
+        **{
+            field: identity[field]
+            for field in ("source_tree_sha256", "generator_sha256", "binary_sha256")
+        },
     }
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     rows = [
