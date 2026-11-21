@@ -68,6 +68,7 @@ Dữ liệu benchmark được ghi nhận với đầy đủ 24 trường:
 ## Tài liệu
 
 - [Cài đặt, build, chạy và kiểm thử CVM-A1](docs/README.md)
+- [JupyterLab và benchmark SCALE trực tiếp trên Ubuntu](notebooks/README.md)
 - [Runner TV3: RAW, resume, provenance và đo RAM](docs/tv3-runner.md)
 - [Kết quả kiểm thử P0 GĐ1](docs/cvm-a1-p0-evidence.md)
 - [Kiến trúc & Luồng dữ liệu (Current Flow)](README_CURRENT_FLOW.md)

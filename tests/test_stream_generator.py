@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import bisect
+import random
 from collections import Counter
 
 import pytest
@@ -48,6 +50,62 @@ def test_same_config_and_seed_reproduce_the_stream(distribution: Distribution) -
     config = config_for(distribution, seed=2026)
 
     assert list(generate_stream(config)) == list(generate_stream(config))
+
+
+def _reference_scale_stream(config: StreamConfig) -> list[int]:
+    """Floyd selection and uniform weighting from the original SCALE generator."""
+    rng = random.Random(config.seed)
+
+    def select(population, count):
+        values, seen = [], set()
+        for upper in range(population - count, population):
+            choice = rng.randrange(upper + 1)
+            value = upper if choice in seen else choice
+            values.append(value)
+            seen.add(value)
+        rng.shuffle(values)
+        return values
+
+    if config.distribution is Distribution.ALL_DUPLICATE:
+        return [rng.randrange(config.n)] * config.m
+    values = select(config.n, config.f0)
+    if config.distribution is Distribution.ALL_DISTINCT:
+        return values
+    values.sort()
+    positions = select(config.m, config.f0)
+    rng.shuffle(positions)
+    forced = dict(zip(positions, values, strict=True))
+    weights = [float(i) for i in range(1, config.f0 + 1)]
+    stream = []
+    for i in range(config.m):
+        if i in forced:
+            stream.append(forced[i])
+        else:
+            index = bisect.bisect_right(weights, rng.random() * weights[-1])
+            stream.append(values[min(index, config.f0 - 1)])
+    return stream
+
+
+@pytest.mark.parametrize("seed", [0, 44000, UINT64_MAX])
+@pytest.mark.parametrize(
+    ("distribution", "m", "n", "f0"),
+    [
+        (Distribution.ALL_DUPLICATE, 8, UINT64_MAX + 1, 1),
+        (Distribution.ALL_DISTINCT, 400, 400, 400),
+        (Distribution.ALL_DISTINCT, 400, 1025, 400),
+        (Distribution.ALL_DISTINCT, 400, UINT64_MAX + 1, 400),
+        (Distribution.UNIFORM, 400, 301, 100),
+        (Distribution.UNIFORM, 400, UINT64_MAX + 1, 100),
+        (Distribution.UNIFORM, 400, 301, 20),
+        (Distribution.UNIFORM, 8, 1, 1),
+    ],
+)
+def test_scale_input_order_matches_original(monkeypatch, seed, distribution, m, n, f0):
+    monkeypatch.setattr("src.stream_generator._COMPACT_MIN_SAMPLE", 2)
+    config = StreamConfig(m, n, f0, distribution, seed)
+    actual = list(generate_stream(config))
+    assert actual == _reference_scale_stream(config)
+    assert len(actual) == m and len(set(actual)) == f0
 
 
 def test_all_duplicate_repeats_one_id() -> None:
